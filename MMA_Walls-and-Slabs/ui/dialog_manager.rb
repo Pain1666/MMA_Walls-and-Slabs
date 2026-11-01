@@ -20,12 +20,13 @@ module MMA_WallsAndSlabs
       @input = Sketchup::InputPoint.new
       @drag_origin = nil
       @drag_origin_mm = nil
+      @preset_index = 0
     end
 
     def activate
       @group ||= pick_wall_group
       if @group && @group.valid?
-        Sketchup.status_text = 'MMA Edit Wall Tool: drag a wall handle.'
+        Sketchup.status_text = 'MMA Edit Wall Tool: drag a wall handle or press T/J/F.'
       else
         Sketchup.status_text = 'MMA Edit Wall Tool: select a wall to edit.'
       end
@@ -71,6 +72,44 @@ module MMA_WallsAndSlabs
       @drag_origin_mm = nil
       Sketchup.status_text = 'MMA Edit Wall Tool: ready.'
       view.invalidate
+    end
+
+    def onKeyDown(key, repeat, flags, view)
+      return unless @group && @group.valid?
+
+      case key
+      when 84, 116 # T
+        cycle_wall_preset
+      when 74, 106 # J
+        cycle_justification
+      when 70, 102 # F
+        flip_selected_wall
+      when 72, 104 # H
+        toggle_height_handle_mode
+      else
+        return
+      end
+
+      view.invalidate
+    end
+
+    def draw(view)
+      return unless @group && @group.valid?
+
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
+
+      color = Sketchup::Color.new(0, 255, 0)
+      handles = wall_handles(wall_model)
+
+      handles.each do |handle|
+        point = handle[:point]
+        view.draw_points([point], 8, color)
+      end
+
+      start_pt = point_in_model_units(wall_model.start_point)
+      end_pt = point_in_model_units(wall_model.end_point)
+      view.draw_line(start_pt, end_pt)
     end
 
     private
@@ -150,6 +189,55 @@ module MMA_WallsAndSlabs
       WallBuilder.rebuild_wall_from_model(Sketchup.active_model, @group, wall_model)
       @drag_origin = current_in
       @drag_origin_mm = current_mm
+    end
+
+    def cycle_wall_preset
+      return unless @group && @group.valid?
+
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
+
+      presets = WallPresets::ALL
+      @preset_index = (@preset_index + 1) % presets.length
+      new_preset = presets[@preset_index]
+      wall_model.apply_preset(new_preset)
+      wall_model.save_to_group(@group)
+      WallBuilder.rebuild_wall_from_model(Sketchup.active_model, @group, wall_model)
+      Sketchup.status_text = "MMA Edit Wall Tool: wall type changed to #{new_preset}."
+    end
+
+    def cycle_justification
+      return unless @group && @group.valid?
+
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
+
+      current = wall_model.justification
+      next_index = (WallJustification::ALL.index(current) || 0) + 1
+      next_index = 0 if next_index >= WallJustification::ALL.length
+      wall_model.set_justification(WallJustification::ALL[next_index])
+      wall_model.save_to_group(@group)
+      WallBuilder.rebuild_wall_from_model(Sketchup.active_model, @group, wall_model)
+      Sketchup.status_text = "MMA Edit Wall Tool: justification = #{wall_model.justification}."
+    end
+
+    def flip_selected_wall
+      return unless @group && @group.valid?
+
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
+
+      wall_model.flip_direction
+      wall_model.save_to_group(@group)
+      WallBuilder.rebuild_wall_from_model(Sketchup.active_model, @group, wall_model)
+      Sketchup.status_text = 'MMA Edit Wall Tool: wall direction flipped.'
+    end
+
+    def toggle_height_handle_mode
+      return unless @group && @group.valid?
+
+      @handle = (@handle == :height) ? :none : :height
+      Sketchup.status_text = (@handle == :height) ? 'MMA Edit Wall Tool: height handle active.' : 'MMA Edit Wall Tool: height handle inactive.'
     end
 
     def point_in_model_units(point_mm)

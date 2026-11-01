@@ -89,7 +89,7 @@ module MMA_WallsAndSlabs
 
     def self.default_for(preset_name)
       name = preset_name.to_s
-      return WallPresets::LAYERS[WallPresets::GENERIC] unless WallPresets::LAYERS.key?(name)
+      return WallPresets::LAYERS[WallPresets::GENERIC].dup unless WallPresets::LAYERS.key?(name)
 
       WallPresets::LAYERS[name].dup
     end
