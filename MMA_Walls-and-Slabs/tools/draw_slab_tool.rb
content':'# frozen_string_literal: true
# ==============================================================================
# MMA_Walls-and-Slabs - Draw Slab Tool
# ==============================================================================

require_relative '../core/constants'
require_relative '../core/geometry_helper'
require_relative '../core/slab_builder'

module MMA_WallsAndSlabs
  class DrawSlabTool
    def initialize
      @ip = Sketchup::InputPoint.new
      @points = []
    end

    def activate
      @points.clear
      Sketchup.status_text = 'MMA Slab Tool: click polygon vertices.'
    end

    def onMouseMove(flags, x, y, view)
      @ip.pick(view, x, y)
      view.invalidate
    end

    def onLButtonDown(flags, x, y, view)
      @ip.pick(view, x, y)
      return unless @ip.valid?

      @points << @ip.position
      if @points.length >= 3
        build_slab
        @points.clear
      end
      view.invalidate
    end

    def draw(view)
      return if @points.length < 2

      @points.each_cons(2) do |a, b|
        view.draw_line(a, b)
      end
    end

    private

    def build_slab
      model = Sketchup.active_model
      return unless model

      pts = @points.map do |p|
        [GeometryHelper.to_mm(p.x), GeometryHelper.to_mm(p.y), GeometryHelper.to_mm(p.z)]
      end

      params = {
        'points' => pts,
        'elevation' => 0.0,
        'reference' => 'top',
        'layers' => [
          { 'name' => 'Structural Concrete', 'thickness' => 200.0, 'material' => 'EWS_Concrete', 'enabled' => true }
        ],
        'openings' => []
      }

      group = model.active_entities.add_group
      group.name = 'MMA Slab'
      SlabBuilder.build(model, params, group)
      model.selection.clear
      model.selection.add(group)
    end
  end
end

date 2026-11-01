@@ -1,0 +1,100 @@
+# frozen_string_literal: true
+# ==============================================================================
+# MMA_Walls-and-Slabs - Draw Wall Tool
+# ==============================================================================
+
+require_relative '../core/constants'
+require_relative '../core/geometry_helper'
+require_relative '../core/wall_builder'
+require_relative '../core/wall_object'
+
+module MMA_WallsAndSlabs
+  class DrawWallTool
+    def initialize
+      @ip = Sketchup::InputPoint.new
+      @points = []
+      @state = :waiting_for_start
+    end
+
+    def activate
+      @points.clear
+      @state = :waiting_for_start
+      Sketchup.status_text = 'MMA Wall Tool: click wall start point.'
+    end
+
+    def onMouseMove(flags, x, y, view)
+      @ip.pick(view, x, y)
+      view.invalidate
+    end
+
+    def onLButtonDown(flags, x, y, view)
+      @ip.pick(view, x, y)
+      return unless @ip.valid?
+
+      p = @ip.position
+
+      if @state == :waiting_for_start
+        @points = [p]
+        @state = :waiting_for_end
+        Sketchup.status_text = 'MMA Wall Tool: click wall end point.'
+      else
+        @points << p
+        build_wall
+        @points.clear
+        @state = :waiting_for_start
+        Sketchup.status_text = 'MMA Wall Tool: wall created.'
+      end
+
+      view.invalidate
+    end
+
+    def draw(view)
+      return if @points.empty?
+
+      if @points.length == 1
+        view.draw_line(@points[0], @points[0])
+      elsif @points.length == 2
+        view.draw_line(@points[0], @points[1])
+      end
+    end
+
+    private
+
+    def build_wall
+      return if @points.length < 2
+
+      p0 = @points[0]
+      p1 = @points[1]
+
+      params = {
+        'start_point' => [GeometryHelper.to_mm(p0.x), GeometryHelper.to_mm(p0.y), GeometryHelper.to_mm(p0.z)],
+        'end_point' => [GeometryHelper.to_mm(p1.x), GeometryHelper.to_mm(p1.y), GeometryHelper.to_mm(p1.z)],
+        'height' => Defaults::WALL_HEIGHT,
+        'justification' => Defaults::WALL_JUSTIFICATION,
+        'core_type' => CoreType::POROTON,
+        'core_thickness' => Defaults::CORE_THICKNESS[CoreType::POROTON],
+        'core_material' => 'EWS_Laterizio',
+        'wall_type' => WallPresets::GENERIC,
+        'ext_layers' => [
+          { 'name' => 'Exterior render', 'thickness' => 15.0, 'material' => 'EWS_Render_Ext', 'enabled' => true },
+          { 'name' => 'Insulation', 'thickness' => 100.0, 'material' => 'EWS_Insulation_EPS', 'enabled' => true }
+        ],
+        'int_layers' => [
+          { 'name' => 'Interior plaster', 'thickness' => 15.0, 'material' => 'EWS_Plaster_Int', 'enabled' => true }
+        ],
+        'openings' => []
+      }
+
+      model = Sketchup.active_model
+      return unless model
+
+      group = model.active_entities.add_group
+      group.name = 'MMA Wall'
+      wall = WallModel.new(params)
+      wall.save_to_group(group)
+      WallBuilder.build(model, wall.params, group)
+      model.selection.clear
+      model.selection.add(group)
+    end
+  end
+end
