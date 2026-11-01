@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MMA Opening Assembly</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>MMA Opening Assembly</h1>
+    <span class="badge" id="mode-badge">New Opening</span>
+  </header>
+
+  <div class="card">
+    <div class="card-title">Opening Dimensions</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Width (mm)</label>
+        <input type="number" id="op-width" value="900">
+      </div>
+      <div class="form-group">
+        <label>Height (mm)</label>
+        <input type="number" id="op-height" value="2100">
+      </div>
+      <div class="form-group">
+        <label>Sill Height (mm)</label>
+        <input type="number" id="op-sill" value="0">
+      </div>
+      <div class="form-group">
+        <label>Type</label>
+        <select id="op-type">
+          <option value="door">Door</option>
+          <option value="window">Window</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions-bar">
+    <button class="btn btn-secondary" onclick="closeDialog()">Cancel</button>
+    <button class="btn btn-primary" onclick="submitOpening()">Place Opening</button>
+  </div>
+
+  <script src="js/opening_dialog.js"></script>
+</body>
+</html>

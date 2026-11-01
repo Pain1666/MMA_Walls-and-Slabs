@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MMA Slab Assembly</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>MMA Slab Assembly</h1>
+    <span class="badge" id="mode-badge">New Slab</span>
+  </header>
+
+  <div class="card">
+    <div class="card-title">Elevation & Reference</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Base Elevation Z (mm)</label>
+        <input type="number" id="slab-elevation" value="0" step="50">
+      </div>
+      <div class="form-group">
+        <label>Reference Plane</label>
+        <select id="slab-reference">
+          <option value="top">Top (Finished Floor at Z, builds down)</option>
+          <option value="bottom">Bottom (Soffit at Z, builds up)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions-bar">
+    <button class="btn btn-secondary" onclick="closeDialog()">Cancel</button>
+    <button class="btn btn-primary" onclick="submitSlab()">Apply & Build Slab</button>
+  </div>
+
+  <script src="js/slab_dialog.js"></script>
+</body>
+</html>
