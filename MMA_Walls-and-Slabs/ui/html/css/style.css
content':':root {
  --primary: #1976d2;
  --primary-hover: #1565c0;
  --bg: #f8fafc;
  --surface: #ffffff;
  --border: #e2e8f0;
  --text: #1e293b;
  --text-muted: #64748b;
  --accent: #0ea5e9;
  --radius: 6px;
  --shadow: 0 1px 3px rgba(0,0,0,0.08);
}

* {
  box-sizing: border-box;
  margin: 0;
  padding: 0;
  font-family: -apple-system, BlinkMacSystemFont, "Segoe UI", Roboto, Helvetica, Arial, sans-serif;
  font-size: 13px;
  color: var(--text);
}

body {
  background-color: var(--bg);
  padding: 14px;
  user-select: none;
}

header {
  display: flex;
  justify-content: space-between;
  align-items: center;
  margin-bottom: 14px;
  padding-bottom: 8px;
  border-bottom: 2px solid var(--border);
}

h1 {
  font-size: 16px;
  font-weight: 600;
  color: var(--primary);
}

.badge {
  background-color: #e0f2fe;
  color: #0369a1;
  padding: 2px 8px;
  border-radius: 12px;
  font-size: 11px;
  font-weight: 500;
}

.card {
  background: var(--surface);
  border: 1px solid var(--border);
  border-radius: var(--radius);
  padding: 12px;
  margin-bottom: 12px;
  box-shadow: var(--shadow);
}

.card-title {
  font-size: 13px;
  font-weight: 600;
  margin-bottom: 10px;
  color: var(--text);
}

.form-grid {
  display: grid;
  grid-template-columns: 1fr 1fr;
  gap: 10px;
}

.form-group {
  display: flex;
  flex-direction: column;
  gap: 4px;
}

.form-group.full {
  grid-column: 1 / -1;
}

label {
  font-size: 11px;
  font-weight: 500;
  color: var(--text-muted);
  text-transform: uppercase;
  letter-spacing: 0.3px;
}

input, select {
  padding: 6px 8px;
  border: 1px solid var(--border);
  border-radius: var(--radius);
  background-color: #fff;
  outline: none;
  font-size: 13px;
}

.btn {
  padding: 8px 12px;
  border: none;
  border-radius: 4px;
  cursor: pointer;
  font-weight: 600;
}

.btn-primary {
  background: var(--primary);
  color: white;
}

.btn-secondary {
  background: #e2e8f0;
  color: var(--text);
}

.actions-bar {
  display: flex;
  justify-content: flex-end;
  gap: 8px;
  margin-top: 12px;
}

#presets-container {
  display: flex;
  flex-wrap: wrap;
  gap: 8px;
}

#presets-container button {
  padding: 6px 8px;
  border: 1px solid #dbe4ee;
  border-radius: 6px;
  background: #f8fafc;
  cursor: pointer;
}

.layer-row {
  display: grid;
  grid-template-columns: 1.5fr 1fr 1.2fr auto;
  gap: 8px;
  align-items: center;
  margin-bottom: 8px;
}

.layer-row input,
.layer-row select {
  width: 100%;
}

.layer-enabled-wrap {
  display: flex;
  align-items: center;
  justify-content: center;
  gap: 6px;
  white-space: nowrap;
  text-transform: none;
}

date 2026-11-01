@@ -1,0 +1,29 @@
+MMA_Walls-and-Slabs/ui/html/js/opening_dialog.js
+content':'let initialData = {
+  width: 900,
+  height: 2100,
+  sill_height: 0,
+  type: 'door'
+};
+
+window.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('op-width').value = initialData.width || 900;
+  document.getElementById('op-height').value = initialData.height || 2100;
+  document.getElementById('op-sill').value = initialData.sill_height || 0;
+  document.getElementById('op-type').value = initialData.type || 'door';
+});
+
+function closeDialog() {
+  window.location = 'skp:close_dialog@';
+}
+
+function submitOpening() {
+  const payload = {
+    type: document.getElementById('op-type').value,
+    width: Number(document.getElementById('op-width').value || 900),
+    height: Number(document.getElementById('op-height').value || 2100),
+    sill_height: Number(document.getElementById('op-sill').value || 0)
+  };
+
+  window.location = 'skp:start_placement_tool@' + encodeURIComponent(JSON.stringify(payload));
+}

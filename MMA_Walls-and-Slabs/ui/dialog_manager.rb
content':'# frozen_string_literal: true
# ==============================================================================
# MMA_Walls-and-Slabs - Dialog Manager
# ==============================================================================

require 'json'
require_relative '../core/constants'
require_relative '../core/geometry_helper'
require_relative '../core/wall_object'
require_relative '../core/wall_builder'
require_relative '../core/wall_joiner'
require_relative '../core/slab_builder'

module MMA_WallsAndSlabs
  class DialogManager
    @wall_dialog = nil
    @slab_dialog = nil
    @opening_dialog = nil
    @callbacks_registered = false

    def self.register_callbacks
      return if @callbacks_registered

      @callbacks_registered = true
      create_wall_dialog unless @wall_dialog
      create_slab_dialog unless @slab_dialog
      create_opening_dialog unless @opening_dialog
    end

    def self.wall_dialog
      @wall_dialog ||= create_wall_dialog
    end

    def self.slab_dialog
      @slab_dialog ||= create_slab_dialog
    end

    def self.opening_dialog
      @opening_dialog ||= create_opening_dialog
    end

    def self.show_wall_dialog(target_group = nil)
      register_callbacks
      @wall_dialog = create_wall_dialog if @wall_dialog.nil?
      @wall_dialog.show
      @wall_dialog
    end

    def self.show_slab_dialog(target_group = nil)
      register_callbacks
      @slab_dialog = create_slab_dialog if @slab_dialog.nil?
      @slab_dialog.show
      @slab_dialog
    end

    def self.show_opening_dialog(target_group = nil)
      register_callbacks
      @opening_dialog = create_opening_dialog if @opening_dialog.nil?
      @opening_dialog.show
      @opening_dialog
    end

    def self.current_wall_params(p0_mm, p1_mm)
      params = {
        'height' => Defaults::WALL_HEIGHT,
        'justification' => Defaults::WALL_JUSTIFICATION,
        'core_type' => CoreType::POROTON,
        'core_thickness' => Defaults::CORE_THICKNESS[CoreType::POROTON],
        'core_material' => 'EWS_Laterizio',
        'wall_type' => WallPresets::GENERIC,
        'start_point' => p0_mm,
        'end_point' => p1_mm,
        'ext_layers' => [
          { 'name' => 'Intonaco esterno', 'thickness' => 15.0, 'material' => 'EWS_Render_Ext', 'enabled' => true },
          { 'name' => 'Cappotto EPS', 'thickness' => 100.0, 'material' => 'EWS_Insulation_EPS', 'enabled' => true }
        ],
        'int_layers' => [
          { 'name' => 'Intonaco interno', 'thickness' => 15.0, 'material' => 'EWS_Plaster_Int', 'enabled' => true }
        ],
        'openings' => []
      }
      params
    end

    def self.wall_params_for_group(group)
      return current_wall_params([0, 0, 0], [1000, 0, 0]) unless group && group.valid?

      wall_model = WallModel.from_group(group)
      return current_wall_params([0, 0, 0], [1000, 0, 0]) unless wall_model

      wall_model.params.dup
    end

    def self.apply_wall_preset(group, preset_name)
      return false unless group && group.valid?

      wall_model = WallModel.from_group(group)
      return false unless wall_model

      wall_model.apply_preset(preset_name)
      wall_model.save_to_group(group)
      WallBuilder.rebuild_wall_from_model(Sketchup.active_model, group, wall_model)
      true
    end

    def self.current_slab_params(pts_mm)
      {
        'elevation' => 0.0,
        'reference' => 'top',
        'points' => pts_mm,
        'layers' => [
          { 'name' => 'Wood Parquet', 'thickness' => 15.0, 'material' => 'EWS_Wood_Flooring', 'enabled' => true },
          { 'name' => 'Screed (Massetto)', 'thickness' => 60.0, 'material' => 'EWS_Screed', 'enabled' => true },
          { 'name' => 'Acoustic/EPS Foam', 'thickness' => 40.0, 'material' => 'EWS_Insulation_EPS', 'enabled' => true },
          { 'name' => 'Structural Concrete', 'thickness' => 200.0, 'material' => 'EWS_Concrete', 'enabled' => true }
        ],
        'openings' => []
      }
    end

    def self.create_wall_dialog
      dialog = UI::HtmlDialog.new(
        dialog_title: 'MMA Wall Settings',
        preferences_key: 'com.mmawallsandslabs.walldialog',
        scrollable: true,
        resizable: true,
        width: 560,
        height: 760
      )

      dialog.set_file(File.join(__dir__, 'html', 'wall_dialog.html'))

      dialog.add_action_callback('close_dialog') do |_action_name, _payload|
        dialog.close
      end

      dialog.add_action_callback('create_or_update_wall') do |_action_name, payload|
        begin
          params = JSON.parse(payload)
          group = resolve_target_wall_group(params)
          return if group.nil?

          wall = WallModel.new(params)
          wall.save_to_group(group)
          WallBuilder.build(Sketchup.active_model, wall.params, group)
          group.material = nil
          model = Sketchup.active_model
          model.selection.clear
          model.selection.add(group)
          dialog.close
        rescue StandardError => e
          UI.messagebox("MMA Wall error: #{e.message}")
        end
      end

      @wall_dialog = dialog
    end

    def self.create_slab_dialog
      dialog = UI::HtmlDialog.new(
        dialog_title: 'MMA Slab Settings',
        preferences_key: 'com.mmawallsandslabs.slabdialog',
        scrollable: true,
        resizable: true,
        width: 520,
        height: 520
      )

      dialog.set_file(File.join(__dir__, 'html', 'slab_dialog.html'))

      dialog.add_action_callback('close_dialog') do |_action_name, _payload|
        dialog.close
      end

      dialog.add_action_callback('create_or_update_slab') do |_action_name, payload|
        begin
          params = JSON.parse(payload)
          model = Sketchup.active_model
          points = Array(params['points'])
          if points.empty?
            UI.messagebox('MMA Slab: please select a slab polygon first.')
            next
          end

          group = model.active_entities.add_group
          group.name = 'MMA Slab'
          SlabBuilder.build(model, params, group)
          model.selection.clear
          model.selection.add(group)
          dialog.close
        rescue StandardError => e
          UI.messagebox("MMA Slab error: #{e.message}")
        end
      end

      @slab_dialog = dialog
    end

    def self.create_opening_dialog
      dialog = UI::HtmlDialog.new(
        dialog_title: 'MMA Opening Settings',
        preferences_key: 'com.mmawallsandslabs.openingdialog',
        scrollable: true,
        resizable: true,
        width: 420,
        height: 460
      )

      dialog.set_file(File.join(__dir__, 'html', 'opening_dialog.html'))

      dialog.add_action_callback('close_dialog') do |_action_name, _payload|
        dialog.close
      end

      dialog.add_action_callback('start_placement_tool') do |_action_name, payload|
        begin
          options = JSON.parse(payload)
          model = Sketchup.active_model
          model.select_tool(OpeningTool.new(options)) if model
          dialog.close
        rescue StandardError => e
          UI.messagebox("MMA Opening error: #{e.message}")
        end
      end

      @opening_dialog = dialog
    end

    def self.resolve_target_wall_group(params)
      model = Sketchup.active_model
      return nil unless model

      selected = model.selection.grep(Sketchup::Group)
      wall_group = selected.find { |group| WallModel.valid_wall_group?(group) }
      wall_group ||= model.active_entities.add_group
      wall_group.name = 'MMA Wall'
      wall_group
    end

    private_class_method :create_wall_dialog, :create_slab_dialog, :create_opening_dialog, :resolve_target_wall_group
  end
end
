@@ -1,0 +1,78 @@
+# frozen_string_literal: true
+# ==============================================================================
+# MMA_Walls-and-Slabs - Main Plugin Loader & Menu/Toolbar Setup
+# ==============================================================================
+
+require 'sketchup.rb'
+
+require_relative 'core/constants'
+require_relative 'core/wall_object'
+require_relative 'core/geometry_helper'
+require_relative 'core/wall_builder'
+require_relative 'core/wall_joiner'
+require_relative 'core/slab_builder'
+require_relative 'core/opening_cutter'
+require_relative 'ui/dialog_manager'
+require_relative 'tools/draw_wall_tool'
+require_relative 'tools/draw_slab_tool'
+require_relative 'tools/opening_tool'
+require_relative 'tools/join_wall_tool'
+require_relative 'tools/edit_wall_tool'
+
+module MMA_WallsAndSlabs
+  unless file_loaded?(__FILE__)
+    # Ensure dialog callbacks are registered as soon as the extension loads.
+    DialogManager.register_callbacks
+
+    cmd_draw_wall = UI::Command.new('Draw Wall') do
+      model = Sketchup.active_model
+      model.select_tool(DrawWallTool.new) if model
+    end
+
+    cmd_draw_slab = UI::Command.new('Draw Slab') do
+      model = Sketchup.active_model
+      model.select_tool(DrawSlabTool.new) if model
+    end
+
+    cmd_opening = UI::Command.new('Opening Tool') do
+      model = Sketchup.active_model
+      model.select_tool(OpeningTool.new) if model
+    end
+
+    cmd_join_walls = UI::Command.new('Join Walls') do
+      model = Sketchup.active_model
+      model.select_tool(JoinWallTool.new) if model
+    end
+
+    cmd_edit_wall = UI::Command.new('Edit Wall') do
+      model = Sketchup.active_model
+      model.select_tool(EditWallTool.new) if model
+    end
+
+    cmd_wall_dialog = UI::Command.new('Wall Settings') do
+      DialogManager.show_wall_dialog if defined?(DialogManager)
+    end
+
+    cmd_slab_dialog = UI::Command.new('Slab Settings') do
+      DialogManager.show_slab_dialog if defined?(DialogManager)
+    end
+
+    cmd_opening_dialog = UI::Command.new('Opening Settings') do
+      DialogManager.show_opening_dialog if defined?(DialogManager)
+    end
+
+    toolbar = UI::Toolbar.new('MMA_WallsAndSlabs')
+    toolbar.add_item(cmd_draw_wall)
+    toolbar.add_item(cmd_draw_slab)
+    toolbar.add_item(cmd_opening)
+    toolbar.add_item(cmd_join_walls)
+    toolbar.add_item(cmd_edit_wall)
+    toolbar.add_separator
+    toolbar.add_item(cmd_wall_dialog)
+    toolbar.add_item(cmd_slab_dialog)
+    toolbar.add_item(cmd_opening_dialog)
+    toolbar.show
+
+    file_loaded(__FILE__)
+  end
+end

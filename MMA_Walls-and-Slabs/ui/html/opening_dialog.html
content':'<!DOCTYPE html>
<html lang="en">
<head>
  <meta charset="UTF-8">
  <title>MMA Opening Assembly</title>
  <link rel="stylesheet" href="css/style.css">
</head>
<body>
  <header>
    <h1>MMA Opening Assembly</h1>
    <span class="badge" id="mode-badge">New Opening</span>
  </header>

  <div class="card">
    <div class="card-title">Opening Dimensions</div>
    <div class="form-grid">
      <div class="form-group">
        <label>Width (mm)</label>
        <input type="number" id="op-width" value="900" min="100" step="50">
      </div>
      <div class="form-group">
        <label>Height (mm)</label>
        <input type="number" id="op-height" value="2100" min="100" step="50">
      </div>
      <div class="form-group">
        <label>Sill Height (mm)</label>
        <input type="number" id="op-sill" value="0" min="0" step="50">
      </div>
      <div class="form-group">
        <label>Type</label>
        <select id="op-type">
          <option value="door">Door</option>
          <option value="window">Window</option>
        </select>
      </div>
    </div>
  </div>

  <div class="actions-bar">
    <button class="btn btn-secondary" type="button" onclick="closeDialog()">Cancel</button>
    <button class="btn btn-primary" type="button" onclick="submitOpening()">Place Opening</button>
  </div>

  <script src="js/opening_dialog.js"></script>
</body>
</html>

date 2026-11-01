@@ -1,0 +1,32 @@
+MMA_Walls-and-Slabs/ui/html/js/slab_dialog.js
+content':'function collectSlabLayers() {
+  return Array.from(document.querySelectorAll('#slab-layers .layer-row')).map((row) => ({
+    name: row.querySelector('.layer-name').value || 'Layer',
+    thickness: Number(row.querySelector('.layer-thickness').value || 0),
+    material: row.querySelector('.layer-material').value || 'EWS_Concrete',
+    enabled: row.querySelector('.layer-enabled').checked
+  }));
+}
+
+function closeDialog() {
+  window.location = 'skp:close_dialog@';
+}
+
+function submitSlab() {
+  const payload = {
+    elevation: Number(document.getElementById('slab-elevation').value || 0),
+    reference: document.getElementById('slab-reference').value || 'top',
+    layers: collectSlabLayers(),
+    openings: []
+  };
+
+  const points = []; // the slab polygon is created by the draw tool; the callback payload is still valid
+  payload.points = points;
+
+  window.location = 'skp:create_or_update_slab@' + encodeURIComponent(JSON.stringify(payload));
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('slab-elevation').value = 0;
+  document.getElementById('slab-reference').value = 'top';
+});
