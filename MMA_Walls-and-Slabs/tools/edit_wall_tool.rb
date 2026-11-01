@@ -1,168 +1,275 @@
 # frozen_string_literal: true
 # ==============================================================================
-# MMA_Walls-and-Slabs - Wall Joiner Engine
+# MMA_Walls-and-Slabs - Edit Wall Tool
 # ==============================================================================
 
-require 'json'
-require_relative 'constants'
-require_relative 'geometry_helper'
-require_relative 'wall_object'
-require_relative 'wall_builder'
+require_relative '../core/constants'
+require_relative '../core/geometry_helper'
+require_relative '../core/wall_object'
+require_relative '../core/wall_builder'
+require_relative '../core/wall_joiner'
 
 module MMA_WallsAndSlabs
-  module JoinType
-    NONE = 'none'
-    MITER = 'miter'
-    BUTT = 'butt'
-    OVERLAP = 'overlap'
-    CONTINUATION = 'continuation'
-  end
+  class EditWallTool
+    HANDLE_RADIUS = 60.0
 
-  class WallJoiner
-    def self.detect_wall_join(model, wall1_group, wall2_group)
-      return JoinType::NONE unless wall1_group && wall1_group.valid? && wall2_group && wall2_group.valid?
-      return JoinType::NONE if wall1_group == wall2_group
+    def initialize(group = nil)
+      @group = group
+      @state = :idle
+      @handle = :none
+      @input = Sketchup::InputPoint.new
+      @drag_origin = nil
+      @drag_origin_mm = nil
+      @preset_index = 0
+      @last_rebuild_signature = nil
+    end
 
-      wall1 = WallModel.from_group(wall1_group)
-      wall2 = WallModel.from_group(wall2_group)
-      return JoinType::NONE unless wall1 && wall2
-
-      a1 = wall1.start_point
-      a2 = wall1.end_point
-      b1 = wall2.start_point
-      b2 = wall2.end_point
-
-      if almost_parallel?(a1, a2, b1, b2)
-        return JoinType::CONTINUATION if lines_overlap_2d?(a1, a2, b1, b2)
-        return JoinType::NONE
-      end
-
-      intersection = find_segment_intersection_2d(a1, a2, b1, b2)
-      return JoinType::NONE unless intersection
-
-      if point_on_segment?(intersection, a1, a2) && point_on_segment?(intersection, b1, b2)
-        JoinType::MITER
+    def activate
+      @group ||= pick_wall_group
+      if @group && @group.valid?
+        Sketchup.status_text = 'MMA Edit Wall Tool: drag a wall handle or press T/J/F.'
       else
-        JoinType::NONE
+        Sketchup.status_text = 'MMA Edit Wall Tool: select a wall to edit.'
       end
     end
 
-    def self.refresh_adjacent_joins(model, wall_group)
-      return false unless model && wall_group && wall_group.valid?
+    def onMouseMove(flags, x, y, view)
+      @input.pick(view, x, y)
+      if @state != :idle && @drag_origin
+        apply_drag(@input.position)
+      end
+      view.invalidate
+    end
 
-      group_list = model.entities.grep(Sketchup::Group)
-      group_list.each do |other|
-        next if other == wall_group
-        next unless WallModel.valid_wall_group?(other)
+    def onLButtonDown(flags, x, y, view)
+      @input.pick(view, x, y)
+      target = @group || pick_wall_group_from_selection
+      return unless target && target.valid?
 
-        join_type = detect_wall_join(model, wall_group, other)
-        next if join_type == JoinType::NONE
+      @group = target
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
 
-        apply_join(model, wall_group, other, join_type)
+      @handle = detect_handle_state(@input.position, wall_model)
+      return if @handle == :none
+
+      @state = :dragging
+      @drag_origin = @input.position
+      @drag_origin_mm = [GeometryHelper.to_mm(@drag_origin.x), GeometryHelper.to_mm(@drag_origin.y), GeometryHelper.to_mm(@drag_origin.z)]
+      Sketchup.status_text = status_for_state(@handle)
+      view.invalidate
+    end
+
+    def onLButtonUp(flags, x, y, view)
+      return unless @group && @group.valid?
+
+      if @state != :idle
+        WallJoiner.refresh_adjacent_joins(Sketchup.active_model, @group)
       end
 
-      true
+      @state = :idle
+      @handle = :none
+      @drag_origin = nil
+      @drag_origin_mm = nil
+      @last_rebuild_signature = nil
+      Sketchup.status_text = 'MMA Edit Wall Tool: ready.'
+      view.invalidate
     end
 
-    def self.apply_join(model, wall1_group, wall2_group, join_type = nil)
-      return false unless wall1_group && wall1_group.valid? && wall2_group && wall2_group.valid?
+    def onKeyDown(key, repeat, flags, view)
+      return unless @group && @group.valid?
 
-      join_type ||= detect_wall_join(model, wall1_group, wall2_group)
-      return false if join_type == JoinType::NONE
-
-      wall1 = WallModel.from_group(wall1_group)
-      wall2 = WallModel.from_group(wall2_group)
-      return false unless wall1 && wall2
-
-      a1 = wall1.start_point
-      a2 = wall1.end_point
-      b1 = wall2.start_point
-      b2 = wall2.end_point
-      intersection = find_segment_intersection_2d(a1, a2, b1, b2)
-      return false unless intersection
-
-      if join_type == JoinType::MITER || join_type == JoinType::BUTT || join_type == JoinType::CONTINUATION
-        wall1_nearest = nearest_endpoint_for_point(wall1, intersection)
-        wall2_nearest = nearest_endpoint_for_point(wall2, intersection)
-
-        if wall1_nearest == :start
-          wall1.set_start_point(intersection)
-        else
-          wall1.set_end_point(intersection)
-        end
-
-        if wall2_nearest == :start
-          wall2.set_start_point(intersection)
-        else
-          wall2.set_end_point(intersection)
-        end
-
-        wall1.save_to_group(wall1_group)
-        wall2.save_to_group(wall2_group)
-        WallBuilder.rebuild_wall_from_model(model, wall1_group, wall1)
-        WallBuilder.rebuild_wall_from_model(model, wall2_group, wall2)
-        return true
+      case key
+      when 84, 116 # T
+        cycle_wall_preset
+      when 74, 106 # J
+        cycle_justification
+      when 70, 102 # F
+        flip_selected_wall
+      when 72, 104 # H
+        toggle_height_handle_mode
+      else
+        return
       end
 
-      false
+      view.invalidate
     end
 
-    def self.find_segment_intersection_2d(p1, p2, q1, q2)
-      x1, y1 = p1[0].to_f, p1[1].to_f
-      x2, y2 = p2[0].to_f, p2[1].to_f
-      x3, y3 = q1[0].to_f, q1[1].to_f
-      x4, y4 = q2[0].to_f, q2[1].to_f
+    def draw(view)
+      return unless @group && @group.valid?
 
-      den = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4))
-      return nil if den.abs < 1e-6
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
 
-      px_num = ((x1 * y2) - (y1 * x2)) * (x3 - x4) - ((x1 - x2) * ((x3 * y4) - (y3 * x4)))
-      py_num = ((x1 * y2) - (y1 * x2)) * (y3 - y4) - ((y1 - y2) * ((x3 * y4) - (y3 * x4)))
+      color = Sketchup::Color.new(0, 255, 0)
+      handles = wall_handles(wall_model)
 
-      px = px_num / den
-      py = py_num / den
-      [px, py, 0.0]
+      handles.each do |handle|
+        point = handle[:point]
+        view.draw_points([point], 8, color)
+      end
+
+      start_pt = point_in_model_units(wall_model.start_point)
+      end_pt = point_in_model_units(wall_model.end_point)
+      view.draw_line(start_pt, end_pt)
     end
 
-    def self.point_on_segment?(point, p1, p2, tolerance = 0.5)
-      min_x = [p1[0], p2[0]].min - tolerance
-      max_x = [p1[0], p2[0]].max + tolerance
-      min_y = [p1[1], p2[1]].min - tolerance
-      max_y = [p1[1], p2[1]].max + tolerance
+    private
 
-      return false unless point[0].to_f >= min_x && point[0].to_f <= max_x
-      return false unless point[1].to_f >= min_y && point[1].to_f <= max_y
+    def pick_wall_group
+      model = Sketchup.active_model
+      return nil unless model
 
-      true
+      model.selection.grep(Sketchup::Group).find { |g| WallModel.valid_wall_group?(g) }
     end
 
-    def self.almost_parallel?(a1, a2, b1, b2, tolerance = 0.01)
-      ax = a2[0] - a1[0]
-      ay = a2[1] - a1[1]
-      bx = b2[0] - b1[0]
-      by = b2[1] - b1[1]
+    def pick_wall_group_from_selection
+      model = Sketchup.active_model
+      return nil unless model
 
-      cross = (ax * by) - (ay * bx)
-      cross.abs <= tolerance
+      model.selection.grep(Sketchup::Group).find { |g| WallModel.valid_wall_group?(g) }
     end
 
-    def self.lines_overlap_2d?(a1, a2, b1, b2)
-      intersection = find_segment_intersection_2d(a1, a2, b1, b2)
-      return false unless intersection
-
-      point_on_segment?(intersection, a1, a2) && point_on_segment?(intersection, b1, b2)
+    def detect_handle_state(position, wall_model)
+      handles = wall_handles(wall_model)
+      handles.each do |handle|
+        return handle[:name] if distance_2d(position, handle[:point]) <= HANDLE_RADIUS
+      end
+      :none
     end
 
-    def self.nearest_endpoint_for_point(wall_model, point)
-      d_start = distance_2d(wall_model.start_point, point)
-      d_end = distance_2d(wall_model.end_point, point)
-      d_start <= d_end ? :start : :end
+    def wall_handles(wall_model)
+      start_point = point_in_model_units(wall_model.start_point)
+      end_point = point_in_model_units(wall_model.end_point)
+      mid_point = point_in_model_units(wall_model.midpoint)
+      height_point = point_in_model_units([
+        wall_model.midpoint[0],
+        wall_model.midpoint[1],
+        wall_model.midpoint[2] + 300.0
+      ])
+
+      [
+        { name: :start, point: start_point },
+        { name: :end, point: end_point },
+        { name: :mid, point: mid_point },
+        { name: :height, point: height_point }
+      ]
     end
 
-    def self.distance_2d(p1, p2)
-      dx = p1[0].to_f - p2[0].to_f
-      dy = p1[1].to_f - p2[1].to_f
+    def apply_drag(position)
+      return unless @group && @group.valid? && @drag_origin && @drag_origin_mm
+
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
+
+      current_in = position
+      current_mm = [GeometryHelper.to_mm(current_in.x), GeometryHelper.to_mm(current_in.y), GeometryHelper.to_mm(current_in.z)]
+      delta_x = current_mm[0] - @drag_origin_mm[0]
+      delta_y = current_mm[1] - @drag_origin_mm[1]
+      delta_z = current_mm[2] - @drag_origin_mm[2]
+
+      case @handle
+      when :start
+        wall_model.set_start_point([
+          wall_model.start_point[0] + delta_x,
+          wall_model.start_point[1] + delta_y,
+          wall_model.start_point[2] + delta_z
+        ])
+      when :end
+        wall_model.set_end_point([
+          wall_model.end_point[0] + delta_x,
+          wall_model.end_point[1] + delta_y,
+          wall_model.end_point[2] + delta_z
+        ])
+      when :mid
+        wall_model.move(delta_x, delta_y, 0.0)
+      when :height
+        wall_model.set_height(wall_model.height + delta_z)
+      end
+
+      signature = [wall_model.start_point, wall_model.end_point, wall_model.height, @handle]
+      if signature != @last_rebuild_signature
+        wall_model.save_to_group(@group)
+        WallBuilder.rebuild_wall_from_model(Sketchup.active_model, @group, wall_model)
+        @last_rebuild_signature = signature
+      end
+
+      @drag_origin = current_in
+      @drag_origin_mm = current_mm
+    end
+
+    def cycle_wall_preset
+      return unless @group && @group.valid?
+
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
+
+      presets = WallPresets::ALL
+      @preset_index = (@preset_index + 1) % presets.length
+      new_preset = presets[@preset_index]
+      wall_model.apply_preset(new_preset)
+      wall_model.save_to_group(@group)
+      WallBuilder.rebuild_wall_from_model(Sketchup.active_model, @group, wall_model)
+      Sketchup.status_text = "MMA Edit Wall Tool: wall type changed to #{new_preset}."
+    end
+
+    def cycle_justification
+      return unless @group && @group.valid?
+
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
+
+      current = wall_model.justification
+      next_index = (WallJustification::ALL.index(current) || 0) + 1
+      next_index = 0 if next_index >= WallJustification::ALL.length
+      wall_model.set_justification(WallJustification::ALL[next_index])
+      wall_model.save_to_group(@group)
+      WallBuilder.rebuild_wall_from_model(Sketchup.active_model, @group, wall_model)
+      Sketchup.status_text = "MMA Edit Wall Tool: justification = #{wall_model.justification}."
+    end
+
+    def flip_selected_wall
+      return unless @group && @group.valid?
+
+      wall_model = WallModel.from_group(@group)
+      return unless wall_model
+
+      wall_model.flip_direction
+      wall_model.save_to_group(@group)
+      WallBuilder.rebuild_wall_from_model(Sketchup.active_model, @group, wall_model)
+      Sketchup.status_text = 'MMA Edit Wall Tool: wall direction flipped.'
+    end
+
+    def toggle_height_handle_mode
+      return unless @group && @group.valid?
+
+      @handle = (@handle == :height) ? :none : :height
+      Sketchup.status_text = (@handle == :height) ? 'MMA Edit Wall Tool: height handle active.' : 'MMA Edit Wall Tool: height handle inactive.'
+    end
+
+    def point_in_model_units(point_mm)
+      Geom::Point3d.new(GeometryHelper.mm(point_mm[0]), GeometryHelper.mm(point_mm[1]), GeometryHelper.mm(point_mm[2]))
+    end
+
+    def distance_2d(a, b)
+      dx = a.x - b.x
+      dy = a.y - b.y
       Math.sqrt((dx * dx) + (dy * dy))
+    end
+
+    def status_for_state(handle)
+      case handle
+      when :start
+        'MMA Edit Wall Tool: dragging wall start point.'
+      when :end
+        'MMA Edit Wall Tool: dragging wall end point.'
+      when :mid
+        'MMA Edit Wall Tool: dragging wall length.'
+      when :height
+        'MMA Edit Wall Tool: dragging wall height.'
+      else
+        'MMA Edit Wall Tool: ready.'
+      end
     end
   end
 end

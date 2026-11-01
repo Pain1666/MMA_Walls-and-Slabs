@@ -1,103 +1,198 @@
 # frozen_string_literal: true
 # ==============================================================================
-# MMA_Walls-and-Slabs - Wall Builder
+# MMA_Walls-and-Slabs - Wall Joiner Engine
 # ==============================================================================
 
 require 'json'
 require_relative 'constants'
 require_relative 'geometry_helper'
 require_relative 'wall_object'
+require_relative 'wall_builder'
 
 module MMA_WallsAndSlabs
-  class WallBuilder
-    def self.serialize_group_data(group, params)
-      WallModel.persist(group, params)
-    end
+  module JoinType
+    NONE = 'none'
+    MITER = 'miter'
+    BUTT = 'butt'
+    OVERLAP = 'overlap'
+    CONTINUATION = 'continuation'
+  end
 
-    def self.rebuild_wall_from_model(model, group, wall_model)
-      return nil unless model && group && group.valid? && wall_model
+  class WallJoiner
+    NEARBY_WALLS_MAX_DISTANCE_MM = 2500.0
 
-      build(model, wall_model.params, group)
-    end
+    def self.detect_wall_join(model, wall1_group, wall2_group)
+      return JoinType::NONE unless wall1_group && wall1_group.valid? && wall2_group && wall2_group.valid?
+      return JoinType::NONE if wall1_group == wall2_group
 
-    def self.sync_wall_to_group(model, group, params)
-      return nil unless model && group && group.valid?
+      wall1 = WallModel.from_group(wall1_group)
+      wall2 = WallModel.from_group(wall2_group)
+      return JoinType::NONE unless wall1 && wall2
 
-      group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
-      group.set_attribute(DICT_NAME, ATTR_DATA, JSON.generate(params))
-      build(model, params, group)
-    end
+      a1 = wall1.start_point
+      a2 = wall1.end_point
+      b1 = wall2.start_point
+      b2 = wall2.end_point
 
-    def self.build(model, params, target_group = nil)
-      return nil if params.nil?
-
-      model_wall = WallModel.new(params)
-      params = model_wall.params
-
-      p0 = params['start_point'] || [0, 0, 0]
-      p1 = params['end_point'] || [100, 0, 0]
-      height_mm = (params['height'] || Defaults::WALL_HEIGHT).to_f
-      height_in = GeometryHelper.mm(height_mm)
-      wall_group = target_group || model.active_entities.add_group
-      entities = wall_group.entities
-      entities.clear! unless target_group.nil?
-      wall_group.name = 'MMA Wall'
-      wall_group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
-      serialize_group_data(wall_group, params)
-
-      p_start = Geom::Point3d.new(GeometryHelper.mm(p0[0]), GeometryHelper.mm(p0[1]), GeometryHelper.mm(p0[2]))
-      p_end = Geom::Point3d.new(GeometryHelper.mm(p1[0]), GeometryHelper.mm(p1[1]), GeometryHelper.mm(p1[2]))
-      vx = p_end - p_start
-      if vx.length < 0.001
-        vx = Geom::Vector3d.new(1, 0, 0)
-      end
-      vy = Geom::Vector3d.new(0, 1, 0)
-      vz = Geom::Vector3d.new(0, 0, 1)
-
-      ext_layers = params['ext_layers'] || []
-      int_layers = params['int_layers'] || []
-
-      ext_layers.each do |layer|
-        next if layer['enabled'] == false
-        thk = GeometryHelper.mm(layer['thickness'].to_f)
-        next if thk <= 0.001
-
-        layer_group = entities.add_group
-        layer_group.name = "Ext Layer: #{layer['name']} (#{layer['thickness'].to_f.round}mm)"
-        mat = GeometryHelper.get_or_create_material(model, layer['material'])
-        layer_group.material = mat if mat
-
-        pts = [
-          p_start,
-          p_end,
-          p_end + vy * thk,
-          p_start + vy * thk
-        ]
-        face = layer_group.entities.add_face(pts)
-        face.pushpull(height_in) if face
+      if almost_parallel?(a1, a2, b1, b2)
+        return JoinType::CONTINUATION if lines_overlap_2d?(a1, a2, b1, b2)
+        return JoinType::NONE
       end
 
-      int_layers.each do |layer|
-        next if layer['enabled'] == false
-        thk = GeometryHelper.mm(layer['thickness'].to_f)
-        next if thk <= 0.001
+      intersection = find_segment_intersection_2d(a1, a2, b1, b2)
+      return JoinType::NONE unless intersection
 
-        layer_group = entities.add_group
-        layer_group.name = "Int Layer: #{layer['name']} (#{layer['thickness'].to_f.round}mm)"
-        mat = GeometryHelper.get_or_create_material(model, layer['material'])
-        layer_group.material = mat if mat
+      if point_on_segment?(intersection, a1, a2) && point_on_segment?(intersection, b1, b2)
+        JoinType::MITER
+      else
+        JoinType::NONE
+      end
+    end
 
-        pts = [
-          p_start,
-          p_end,
-          p_end + vy * thk,
-          p_start + vy * thk
-        ]
-        face = layer_group.entities.add_face(pts)
-        face.pushpull(height_in) if face
+    def self.refresh_adjacent_joins(model, wall_group, max_distance = NEARBY_WALLS_MAX_DISTANCE_MM)
+      return false unless model && wall_group && wall_group.valid?
+
+      wall_model = WallModel.from_group(wall_group)
+      return false unless wall_model
+
+      nearby_wall_groups(model, wall_group, wall_model, max_distance).each do |other|
+        next if other == wall_group
+        next unless WallModel.valid_wall_group?(other)
+
+        join_type = detect_wall_join(model, wall_group, other)
+        next if join_type == JoinType::NONE
+
+        apply_join(model, wall_group, other, join_type)
       end
 
-      wall_group
+      true
+    end
+
+    def self.nearby_wall_groups(model, wall_group, wall_model = nil, max_distance = NEARBY_WALLS_MAX_DISTANCE_MM)
+      return [] unless model && wall_group && wall_group.valid?
+
+      anchor = wall_model || WallModel.from_group(wall_group)
+      return [] unless anchor
+
+      anchor_mid = anchor.midpoint
+      model.entities.grep(Sketchup::Group).each_with_object([]) do |other, matches|
+        next if other == wall_group
+        next unless WallModel.valid_wall_group?(other)
+
+        candidate = WallModel.from_group(other)
+        next unless candidate
+        next if distance_2d(anchor_mid, candidate.midpoint) > max_distance
+
+        matches << other
+      end
+    end
+
+    def self.apply_join(model, wall1_group, wall2_group, join_type = nil)
+      return false unless wall1_group && wall1_group.valid? && wall2_group && wall2_group.valid?
+
+      join_type ||= detect_wall_join(model, wall1_group, wall2_group)
+      return false if join_type == JoinType::NONE
+
+      wall1 = WallModel.from_group(wall1_group)
+      wall2 = WallModel.from_group(wall2_group)
+      return false unless wall1 && wall2
+
+      a1 = wall1.start_point
+      a2 = wall1.end_point
+      b1 = wall2.start_point
+      b2 = wall2.end_point
+      intersection = find_segment_intersection_2d(a1, a2, b1, b2)
+      return false unless intersection
+
+      if join_type == JoinType::MITER || join_type == JoinType::BUTT || join_type == JoinType::CONTINUATION
+        wall1_nearest = nearest_endpoint_for_point(wall1, intersection)
+        wall2_nearest = nearest_endpoint_for_point(wall2, intersection)
+
+        if wall1_nearest == :start
+          wall1.set_start_point(intersection)
+        else
+          wall1.set_end_point(intersection)
+        end
+
+        if wall2_nearest == :start
+          wall2.set_start_point(intersection)
+        else
+          wall2.set_end_point(intersection)
+        end
+
+        wall1.save_to_group(wall1_group)
+        wall2.save_to_group(wall2_group)
+
+        unless wall1.params == WallModel.from_group(wall1_group)&.params
+          WallBuilder.rebuild_wall_from_model(model, wall1_group, wall1)
+        end
+
+        unless wall2.params == WallModel.from_group(wall2_group)&.params
+          WallBuilder.rebuild_wall_from_model(model, wall2_group, wall2)
+        end
+
+        return true
+      end
+
+      false
+    end
+
+    def self.find_segment_intersection_2d(p1, p2, q1, q2)
+      x1, y1 = p1[0].to_f, p1[1].to_f
+      x2, y2 = p2[0].to_f, p2[1].to_f
+      x3, y3 = q1[0].to_f, q1[1].to_f
+      x4, y4 = q2[0].to_f, q2[1].to_f
+
+      den = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4))
+      return nil if den.abs < 1e-6
+
+      px_num = ((x1 * y2) - (y1 * x2)) * (x3 - x4) - ((x1 - x2) * ((x3 * y4) - (y3 * x4)))
+      py_num = ((x1 * y2) - (y1 * x2)) * (y3 - y4) - ((y1 - y2) * ((x3 * y4) - (y3 * x4)))
+
+      px = px_num / den
+      py = py_num / den
+      [px, py, 0.0]
+    end
+
+    def self.point_on_segment?(point, p1, p2, tolerance = 0.5)
+      min_x = [p1[0], p2[0]].min - tolerance
+      max_x = [p1[0], p2[0]].max + tolerance
+      min_y = [p1[1], p2[1]].min - tolerance
+      max_y = [p1[1], p2[1]].max + tolerance
+
+      return false unless point[0].to_f >= min_x && point[0].to_f <= max_x
+      return false unless point[1].to_f >= min_y && point[1].to_f <= max_y
+
+      true
+    end
+
+    def self.almost_parallel?(a1, a2, b1, b2, tolerance = 0.01)
+      ax = a2[0] - a1[0]
+      ay = a2[1] - a1[1]
+      bx = b2[0] - b1[0]
+      by = b2[1] - b1[1]
+
+      cross = (ax * by) - (ay * bx)
+      cross.abs <= tolerance
+    end
+
+    def self.lines_overlap_2d?(a1, a2, b1, b2)
+      intersection = find_segment_intersection_2d(a1, a2, b1, b2)
+      return false unless intersection
+
+      point_on_segment?(intersection, a1, a2) && point_on_segment?(intersection, b1, b2)
+    end
+
+    def self.nearest_endpoint_for_point(wall_model, point)
+      d_start = distance_2d(wall_model.start_point, point)
+      d_end = distance_2d(wall_model.end_point, point)
+      d_start <= d_end ? :start : :end
+    end
+
+    def self.distance_2d(p1, p2)
+      dx = p1[0].to_f - p2[0].to_f
+      dy = p1[1].to_f - p2[1].to_f
+      Math.sqrt((dx * dx) + (dy * dy))
     end
   end
 end
