@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Euro Slab Assembly</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Euro Slab Assembly</h1>
+    <span class="badge" id="mode-badge">New Slab</span>
+  </header>
+
+  <!-- Presets -->
+  <div class="card" style="padding: 8px 12px;">
+    <label style="margin-bottom: 4px; display: block;">Quick Slab Presets</label>
+    <div id="presets-container">
+      <span class="preset-chip" onclick="applyPreset('standard_wood')">Residential Floor (Parquet)</span>
+      <span class="preset-chip" onclick="applyPreset('standard_tile')">Residential Floor (Tiles)</span>
+      <span class="preset-chip" onclick="applyPreset('concrete_mono')">Monolithic Concrete 200mm</span>
+      <span class="preset-chip" onclick="applyPreset('roof_insulated')">Insulated Roof Slab</span>
+    </div>
+  </div>
+
+  <!-- General Parameters -->
+  <div class="card">
+    <div class="card-title">Elevation & Reference</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Base Elevation Z (mm)</label>
+        <input type="number" id="slab-elevation" value="0" step="50">
+      </div>
+      <div class="form-group">
+        <label>Reference Plane</label>
+        <select id="slab-reference">
+          <option value="top">Top (Finished Floor at Z, builds down)</option>
+          <option value="bottom">Bottom (Soffit at Z, builds up)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slab Layers (Top to Bottom) -->
+  <div class="card">
+    <div class="card-title">
+      Slab Layers (Top Surface to Bottom Soffit)
+    </div>
+    <table class="layers-table" id="slab-layers-table">
+      <thead>
+        <tr>
+          <th>Layer Name</th>
+          <th style="width: 85px;">Thk (mm)</th>
+          <th style="width: 140px;">Material</th>
+          <th style="width: 30px;"></th>
+        </tr>
+      </thead>
+      <tbody id="slab-layers-body"></tbody>
+    </table>
+    <button class="btn btn-dashed btn-sm" onclick="addLayer()">+ Add Slab Layer</button>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions-bar">
+    <button class="btn btn-secondary" onclick="closeDialog()">Cancel</button>
+    <button class="btn btn-primary" onclick="submitSlab()">Apply & Build Slab</button>
+  </div>
+
+  <script src="js/slab_dialog.js"></script>
+</body>
+</html>

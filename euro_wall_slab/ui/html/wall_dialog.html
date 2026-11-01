@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Euro Wall Assembly</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Euro Wall Assembly</h1>
+    <span class="badge" id="mode-badge">New Wall</span>
+  </header>
+
+  <!-- Presets -->
+  <div class="card" style="padding: 8px 12px;">
+    <label style="margin-bottom: 4px; display: block;">Quick European Presets</label>
+    <div id="presets-container">
+      <span class="preset-chip" onclick="applyPreset('ext_laterizio_cappotto')">Ext. Laterizio + Cappotto</span>
+      <span class="preset-chip" onclick="applyPreset('ext_concrete_cappotto')">Ext. Concrete + Insulation</span>
+      <span class="preset-chip" onclick="applyPreset('int_laterizio')">Int. Partition Laterizio</span>
+      <span class="preset-chip" onclick="applyPreset('drywall_double')">Drywall Cartongesso (Double Board)</span>
+      <span class="preset-chip" onclick="applyPreset('solid_brick')">Solid Brick 250mm</span>
+    </div>
+  </div>
+
+  <!-- General Parameters -->
+  <div class="card">
+    <div class="card-title">General Dimensions</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Wall Height (mm)</label>
+        <input type="number" id="wall-height" value="2800" min="100" step="50">
+      </div>
+      <div class="form-group">
+        <label>Justification</label>
+        <select id="wall-justification">
+          <option value="center">Center</option>
+          <option value="exterior">Exterior Face</option>
+          <option value="interior">Interior Face</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Structural Core -->
+  <div class="card">
+    <div class="card-title">Structural Core</div>
+    <div class="form-grid">
+      <div class="form-group full">
+        <label>Core Type</label>
+        <select id="core-type" onchange="onCoreTypeChange()">
+          <option value="poroton">Hollow Clay Block (Laterizio / Poroton)</option>
+          <option value="concrete">Concrete (Calcestruzzo armato)</option>
+          <option value="brick">Solid Brick (Mattone pieno)</option>
+          <option value="aac_block">Aerated Concrete (Ytong / Blocco cls)</option>
+          <option value="drywall">Drywall Partition (Cartongesso)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Core Thickness (mm)</label>
+        <input type="number" id="core-thickness" value="250" min="20" step="5">
+      </div>
+      <div class="form-group" id="core-mat-group">
+        <label>Material</label>
+        <select id="core-material">
+          <option value="EWS_Laterizio">EWS_Laterizio (Terracotta)</option>
+          <option value="EWS_Concrete">EWS_Concrete (Concrete)</option>
+          <option value="EWS_Brick">EWS_Brick (Solid Brick)</option>
+          <option value="EWS_Ytong">EWS_Ytong (Aerated)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Drywall Specific Options (Metal Studs + Boards) -->
+    <div id="drywall-options" style="display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>C-Stud Spacing (mm)</label>
+          <input type="number" id="drywall-spacing" value="600" step="50">
+        </div>
+        <div class="form-group">
+          <label>Board Thickness (mm)</label>
+          <input type="number" id="drywall-board-thick" value="12.5" step="0.5">
+        </div>
+        <div class="form-group">
+          <label>Exterior Board Layers</label>
+          <select id="drywall-boards-ext">
+            <option value="1">1 Board (Single)</option>
+            <option value="2" selected>2 Boards (Double)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Interior Board Layers</label>
+          <select id="drywall-boards-int">
+            <option value="1">1 Board (Single)</option>
+            <option value="2" selected>2 Boards (Double)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Exterior Layers (Exterior -> Core) -->
+  <div class="card">
+    <div class="card-title">
+      Exterior Layers (Outermost to Core)
+    </div>
+    <table class="layers-table" id="ext-layers-table">
+      <thead>
+        <tr>
+          <th>Layer Name</th>
+          <th style="width: 85px;">Thk (mm)</th>
+          <th style="width: 140px;">Material</th>
+          <th style="width: 30px;"></th>
+        </tr>
+      </thead>
+      <tbody id="ext-layers-body"></tbody>
+    </table>
+    <button class="btn btn-dashed btn-sm" onclick="addLayer('ext')">+ Add Exterior Layer</button>
+  </div>
+
+  <!-- Interior Layers (Core -> Interior) -->
+  <div class="card">
+    <div class="card-title">
+      Interior Layers (Core to Innermost)
+    </div>
+    <table class="layers-table" id="int-layers-table">
+      <thead>
+        <tr>
+          <th>Layer Name</th>
+          <th style="width: 85px;">Thk (mm)</th>
+          <th style="width: 140px;">Material</th>
+          <th style="width: 30px;"></th>
+        </tr>
+      </thead>
+      <tbody id="int-layers-body"></tbody>
+    </table>
+    <button class="btn btn-dashed btn-sm" onclick="addLayer('int')">+ Add Interior Layer</button>
+  </div>
+
+  <!-- Existing Openings (if editing) -->
+  <div class="card" id="openings-card" style="display: none;">
+    <div class="card-title">Openings on this Wall</div>
+    <div class="openings-list" id="openings-container"></div>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions-bar">
+    <button class="btn btn-secondary" onclick="closeDialog()">Cancel</button>
+    <button class="btn btn-primary" onclick="submitWall()">Apply & Build Wall</button>
+  </div>
+
+  <script src="js/wall_dialog.js"></script>
+</body>
+</html>
