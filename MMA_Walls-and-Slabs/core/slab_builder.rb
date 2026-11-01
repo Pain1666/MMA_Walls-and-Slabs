@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 # ==============================================================================
-# MMA_Walls-and-Slabs - Slab Builder
+# MMA_Walls-and-Slabs - Wall Builder
 # ==============================================================================
 
 require 'json'
@@ -8,48 +8,64 @@ require_relative 'constants'
 require_relative 'geometry_helper'
 
 module MMA_WallsAndSlabs
-  class SlabBuilder
-    def self.build(model, params, target_group = nil)
-      pts_raw = params['points'] || []
-      return nil if pts_raw.length < 3
+  class WallBuilder
+    def self.serialize_group_data(group, params)
+      payload = JSON.generate(params)
+      existing = group.get_attribute(DICT_NAME, ATTR_DATA)
+      return if existing == payload
 
-      elevation_in = GeometryHelper.mm(params['elevation'] || 0.0)
-      layers = (params['layers'] || []).select { |l| l['enabled'] != false }
-      if layers.empty?
-        layers = [{ 'name' => 'Concrete Slab', 'thickness' => 200.0, 'material' => 'EWS_Concrete', 'enabled' => true }]
-      end
-
-      model.start_operation('Build MMA Slab', true)
-      slab_group = target_group || model.active_entities.add_group
-      entities = slab_group.entities
-      entities.clear! unless target_group.nil?
-      slab_group.name = 'MMA Slab'
-      slab_group.set_attribute(DICT_NAME, ATTR_TYPE, 'slab')
-      slab_group.set_attribute(DICT_NAME, ATTR_DATA, JSON.generate(params))
-
-      points = pts_raw.map { |p| Geom::Point3d.new(GeometryHelper.mm(p[0]), GeometryHelper.mm(p[1]), elevation_in) }
-      layers.each do |layer|
-        thk_in = GeometryHelper.mm(layer['thickness'].to_f)
-        next if thk_in <= 0.001
-
-        layer_group = entities.add_group
-        layer_group.name = "Layer: #{layer['name']} (#{layer['thickness'].to_f.round}mm)"
-        mat = GeometryHelper.get_or_create_material(model, layer['material'])
-        layer_group.material = mat if mat
-        face = layer_group.entities.add_face(points)
-        face.pushpull(-thk_in) if face
-      end
-
-      model.commit_operation
-      slab_group
+      group.set_attribute(DICT_NAME, ATTR_DATA, payload)
     end
 
-    def self.create_from_face(model, face, layers)
-      return nil unless face
+    def self.build(model, params, target_group = nil)
+      return nil if params.nil?
 
-      pts = face.outer_loop.vertices.map { |v| [GeometryHelper.to_mm(v.position.x), GeometryHelper.to_mm(v.position.y), GeometryHelper.to_mm(v.position.z)] }
-      params = { 'points' => pts, 'elevation' => 0.0, 'reference' => 'top', 'layers' => layers, 'openings' => [] }
-      build(model, params)
+      p0 = params['start_point'] || [0, 0, 0]
+      p1 = params['end_point'] || [100, 0, 0]
+      height_mm = (params['height'] || Defaults::WALL_HEIGHT).to_f
+      height_in = GeometryHelper.mm(height_mm)
+      wall_group = target_group || model.active_entities.add_group
+      entities = wall_group.entities
+      entities.clear! unless target_group.nil?
+      wall_group.name = 'MMA Wall'
+      wall_group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
+      serialize_group_data(wall_group, params)
+
+      p_start = Geom::Point3d.new(GeometryHelper.mm(p0[0]), GeometryHelper.mm(p0[1]), GeometryHelper.mm(p0[2]))
+      p_end = Geom::Point3d.new(GeometryHelper.mm(p1[0]), GeometryHelper.mm(p1[1]), GeometryHelper.mm(p1[2]))
+      vx = p_end - p_start
+      if vx.length < 0.001
+        vx = Geom::Vector3d.new(1, 0, 0)
+      end
+      vy = Geom::Vector3d.new(0, 1, 0)
+      vz = Geom::Vector3d.new(0, 0, 1)
+
+      ext_layers = params['ext_layers'] || []
+      int_layers = params['int_layers'] || []
+
+      current_y = 0.0
+      ext_layers.each do |layer|
+        next if layer['enabled'] == false
+        thk = GeometryHelper.mm(layer['thickness'].to_f)
+        next if thk <= 0.001
+
+        layer_group = entities.add_group
+        layer_group.name = "Ext Layer: #{layer['name']} (#{layer['thickness'].to_f.round}mm)"
+        mat = GeometryHelper.get_or_create_material(model, layer['material'])
+        layer_group.material = mat if mat
+
+        pts = [
+          p_start,
+          p_end,
+          p_end + vy*thk,
+          p_start + vy*thk
+        ]
+        face = layer_group.entities.add_face(pts)
+        face.pushpull(height_in) if face
+        current_y += thk
+      end
+
+      wall_group
     end
   end
 end

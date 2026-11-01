@@ -1,72 +1,67 @@
 # frozen_string_literal: true
 # ==============================================================================
-# MMA_Walls-and-Slabs - Geometry & Corner Joint Helpers
+# MMA_Walls-and-Slabs - Opening Cutter Manager
 # ==============================================================================
 
+require 'json'
 require_relative 'constants'
+require_relative 'wall_builder'
+require_relative 'slab_builder'
 
 module MMA_WallsAndSlabs
-  module GeometryHelper
-    def self.mm(val)
-      val.to_f / 25.4
-    end
+  class OpeningCutter
+    def self.add_wall_openings(model, wall_group, new_openings)
+      return nil unless wall_group && wall_group.valid?
 
-    def self.to_mm(val)
-      val.to_f * 25.4
-    end
+      openings = Array(new_openings).compact
+      return nil if openings.empty?
 
-    def self.get_or_create_material(model, mat_name)
-      return nil if mat_name.nil? || mat_name.to_s.strip.empty?
+      data_json = wall_group.get_attribute(DICT_NAME, ATTR_DATA)
+      return nil unless data_json
 
-      materials = model.materials
-      existing = materials[mat_name]
-      if existing
-        if DefaultMaterials::PALETTE.key?(mat_name) && existing.color.red == 0 && existing.color.green == 0 && existing.color.blue == 0
-          rgb = DefaultMaterials::PALETTE[mat_name]
-          existing.color = Sketchup::Color.new(rgb[0], rgb[1], rgb[2]) rescue (existing.color = rgb)
-        end
-        return existing
+      params = JSON.parse(data_json)
+      params['openings'] ||= []
+
+      openings.each do |opening|
+        next if opening.nil?
+
+        item = opening.dup
+        item['id'] ||= "op_#{Time.now.to_i}_#{rand(1000)}"
+        params['openings'] << item
       end
 
-      mat = materials.add(mat_name)
+      WallBuilder.build(model, params, wall_group)
+    end
 
-      if DefaultMaterials::PALETTE.key?(mat_name)
-        rgb = DefaultMaterials::PALETTE[mat_name]
-        begin
-          mat.color = Sketchup::Color.new(rgb[0], rgb[1], rgb[2])
-        rescue
-          mat.color = rgb
-        end
-        mat.alpha = 1.0
+    def self.add_wall_opening(model, wall_group, opening_params)
+      add_wall_openings(model, wall_group, [opening_params])
+    end
 
-        tex_file = DefaultMaterials::TEXTURE_FILES[mat_name]
-        if tex_file
-          tex_path = File.join(File.dirname(__dir__), 'materials', tex_file)
-          if File.exist?(tex_path)
-            begin
-              mat.texture = tex_path
-              tex_size = DefaultMaterials::TEXTURE_SIZES[tex_file] || [600.0, 600.0]
-              mat.texture.size = [mm(tex_size[0]), mm(tex_size[1])]
-            rescue => e
-              puts "[MMA_WallsAndSlabs] Notice: Texture load skipped (#{e.message})"
-            end
-          end
-        end
+    def self.add_slab_openings(model, slab_group, new_openings)
+      return nil unless slab_group && slab_group.valid?
+
+      openings = Array(new_openings).compact
+      return nil if openings.empty?
+
+      data_json = slab_group.get_attribute(DICT_NAME, ATTR_DATA)
+      return nil unless data_json
+
+      params = JSON.parse(data_json)
+      params['openings'] ||= []
+
+      openings.each do |opening|
+        next if opening.nil?
+
+        item = opening.dup
+        item['id'] ||= "slab_op_#{Time.now.to_i}_#{rand(1000)}"
+        params['openings'] << item
       end
 
-      mat
+      SlabBuilder.build(model, params, slab_group)
     end
 
-    def self.vec_scale(v, s)
-      Geom::Vector3d.new(v.x * s, v.y * s, v.z * s)
-    end
-
-    def self.ray_plane_intersection(p_ray, v_dir, p_plane, v_norm)
-      denom = v_dir.dot(v_norm)
-      return p_ray if denom.abs < 1e-5
-
-      t = (p_plane - p_ray).dot(v_norm) / denom
-      p_ray + vec_scale(v_dir, t)
+    def self.add_slab_opening(model, slab_group, opening_params)
+      add_slab_openings(model, slab_group, [opening_params])
     end
   end
 end
