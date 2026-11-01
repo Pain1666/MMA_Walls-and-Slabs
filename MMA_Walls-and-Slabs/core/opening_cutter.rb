@@ -1,63 +1,67 @@
 # frozen_string_literal: true
 # ==============================================================================
-# MMA_Walls-and-Slabs - Slab Builder
+# MMA_Walls-and-Slabs - Opening Cutter Manager
 # ==============================================================================
 
 require 'json'
 require_relative 'constants'
-require_relative 'geometry_helper'
+require_relative 'wall_builder'
+require_relative 'slab_builder'
 
 module MMA_WallsAndSlabs
-  class SlabBuilder
-    def self.serialize_group_data(group, params)
-      payload = JSON.generate(params)
-      existing = group.get_attribute(DICT_NAME, ATTR_DATA)
-      return if existing == payload
+  class OpeningCutter
+    def self.add_wall_openings(model, wall_group, new_openings)
+      return nil unless wall_group && wall_group.valid?
 
-      group.set_attribute(DICT_NAME, ATTR_DATA, payload)
-    end
+      openings = Array(new_openings).compact
+      return nil if openings.empty?
 
-    def self.build(model, params, target_group = nil)
-      pts_raw = params['points'] || []
-      return nil if pts_raw.length < 3
+      data_json = wall_group.get_attribute(DICT_NAME, ATTR_DATA)
+      return nil unless data_json
 
-      elevation_in = GeometryHelper.mm(params['elevation'] || 0.0)
-      layers = (params['layers'] || []).select { |l| l['enabled'] != false }
-      if layers.empty?
-        layers = [{ 'name' => 'Concrete Slab', 'thickness' => 200.0, 'material' => 'EWS_Concrete', 'enabled' => true }]
+      params = JSON.parse(data_json)
+      params['openings'] ||= []
+
+      openings.each do |opening|
+        next if opening.nil?
+
+        item = opening.dup
+        item['id'] ||= "op_#{Time.now.to_i}_#{rand(1000)}"
+        params['openings'] << item
       end
 
-      model.start_operation('Build MMA Slab', true)
-      slab_group = target_group || model.active_entities.add_group
-      entities = slab_group.entities
-      entities.clear! unless target_group.nil?
-      slab_group.name = 'MMA Slab'
-      slab_group.set_attribute(DICT_NAME, ATTR_TYPE, 'slab')
-      serialize_group_data(slab_group, params)
-
-      points = pts_raw.map { |p| Geom::Point3d.new(GeometryHelper.mm(p[0]), GeometryHelper.mm(p[1]), elevation_in) }
-      layers.each do |layer|
-        thk_in = GeometryHelper.mm(layer['thickness'].to_f)
-        next if thk_in <= 0.001
-
-        layer_group = entities.add_group
-        layer_group.name = "Layer: #{layer['name']} (#{layer['thickness'].to_f.round}mm)"
-        mat = GeometryHelper.get_or_create_material(model, layer['material'])
-        layer_group.material = mat if mat
-        face = layer_group.entities.add_face(points)
-        face.pushpull(-thk_in) if face
-      end
-
-      model.commit_operation
-      slab_group
+      WallBuilder.build(model, params, wall_group)
     end
 
-    def self.create_from_face(model, face, layers)
-      return nil unless face
+    def self.add_wall_opening(model, wall_group, opening_params)
+      add_wall_openings(model, wall_group, [opening_params])
+    end
 
-      pts = face.outer_loop.vertices.map { |v| [GeometryHelper.to_mm(v.position.x), GeometryHelper.to_mm(v.position.y), GeometryHelper.to_mm(v.position.z)] }
-      params = { 'points' => pts, 'elevation' => 0.0, 'reference' => 'top', 'layers' => layers, 'openings' => [] }
-      build(model, params)
+    def self.add_slab_openings(model, slab_group, new_openings)
+      return nil unless slab_group && slab_group.valid?
+
+      openings = Array(new_openings).compact
+      return nil if openings.empty?
+
+      data_json = slab_group.get_attribute(DICT_NAME, ATTR_DATA)
+      return nil unless data_json
+
+      params = JSON.parse(data_json)
+      params['openings'] ||= []
+
+      openings.each do |opening|
+        next if opening.nil?
+
+        item = opening.dup
+        item['id'] ||= "slab_op_#{Time.now.to_i}_#{rand(1000)}"
+        params['openings'] << item
+      end
+
+      SlabBuilder.build(model, params, slab_group)
+    end
+
+    def self.add_slab_opening(model, slab_group, opening_params)
+      add_slab_openings(model, slab_group, [opening_params])
     end
   end
 end
