@@ -18,13 +18,9 @@ require_relative 'tools/opening_tool'
 require_relative 'tools/join_wall_tool'
 require_relative 'tools/edit_wall_tool'
 
-module EuroWallSlab
+module MMA_WallsAndSlabs
   unless file_loaded?(__FILE__)
     icon_dir = File.join(File.dirname(__FILE__), 'icons')
-
-    # --------------------------------------------------------------------------
-    # Commands with Dedicated Custom Icons
-    # --------------------------------------------------------------------------
 
     cmd_draw_wall = UI::Command.new('Draw Wall') do
       Sketchup.active_model.select_tool(DrawWallTool.new)

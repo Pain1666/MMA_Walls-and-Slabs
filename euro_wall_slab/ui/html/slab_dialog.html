@@ -2,16 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Euro Slab Assembly</title>
+  <title>MMA Slab Assembly</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header>
-    <h1>Euro Slab Assembly</h1>
+    <h1>MMA Slab Assembly</h1>
     <span class="badge" id="mode-badge">New Slab</span>
   </header>
 
-  <!-- Presets -->
   <div class="card" style="padding: 8px 12px;">
     <label style="margin-bottom: 4px; display: block;">Quick Slab Presets</label>
     <div id="presets-container">
@@ -22,7 +21,6 @@
     </div>
   </div>
 
-  <!-- General Parameters -->
   <div class="card">
     <div class="card-title">Elevation & Reference</div>
     <div class="form-grid">
@@ -40,7 +38,6 @@
     </div>
   </div>
 
-  <!-- Slab Layers (Top to Bottom) -->
   <div class="card">
     <div class="card-title">
       Slab Layers (Top Surface to Bottom Soffit)
@@ -59,7 +56,6 @@
     <button class="btn btn-dashed btn-sm" onclick="addLayer()">+ Add Slab Layer</button>
   </div>
 
-  <!-- Actions -->
   <div class="actions-bar">
     <button class="btn btn-secondary" onclick="closeDialog()">Cancel</button>
     <button class="btn btn-primary" onclick="submitSlab()">Apply & Build Slab</button>
