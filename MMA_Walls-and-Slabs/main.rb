@@ -24,5 +24,54 @@ module MMA_WallsAndSlabs
     icon_dir = File.join(File.dirname(__FILE__), 'icons')
 
     cmd_draw_wall = UI::Command.new('Draw Wall') do
-      Sketchup.active_model.select_tool(DrawWallTool.new)
+      model = Sketchup.active_model
+      model.select_tool(DrawWallTool.new) if model
     end
+
+    cmd_draw_slab = UI::Command.new('Draw Slab') do
+      model = Sketchup.active_model
+      model.select_tool(DrawSlabTool.new) if model
+    end
+
+    cmd_opening = UI::Command.new('Opening Tool') do
+      model = Sketchup.active_model
+      model.select_tool(OpeningTool.new) if model
+    end
+
+    cmd_join_walls = UI::Command.new('Join Walls') do
+      model = Sketchup.active_model
+      model.select_tool(JoinWallTool.new) if model
+    end
+
+    cmd_edit_wall = UI::Command.new('Edit Wall') do
+      model = Sketchup.active_model
+      model.select_tool(EditWallTool.new) if model
+    end
+
+    cmd_wall_dialog = UI::Command.new('Wall Settings') do
+      DialogManager.show_wall_dialog if defined?(DialogManager)
+    end
+
+    cmd_slab_dialog = UI::Command.new('Slab Settings') do
+      DialogManager.show_slab_dialog if defined?(DialogManager)
+    end
+
+    cmd_opening_dialog = UI::Command.new('Opening Settings') do
+      DialogManager.show_opening_dialog if defined?(DialogManager)
+    end
+
+    toolbar = UI::Toolbar.new('MMA_WallsAndSlabs')
+    toolbar.add_item(cmd_draw_wall)
+    toolbar.add_item(cmd_draw_slab)
+    toolbar.add_item(cmd_opening)
+    toolbar.add_item(cmd_join_walls)
+    toolbar.add_item(cmd_edit_wall)
+    toolbar.add_separator
+    toolbar.add_item(cmd_wall_dialog)
+    toolbar.add_item(cmd_slab_dialog)
+    toolbar.add_item(cmd_opening_dialog)
+    toolbar.show
+
+    file_loaded(__FILE__)
+  end
+end
