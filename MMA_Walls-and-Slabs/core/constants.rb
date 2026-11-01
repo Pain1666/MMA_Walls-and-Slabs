@@ -45,10 +45,12 @@ module MMA_WallsAndSlabs
 
     TEXTURE_FILES = {
       'EWS_Concrete'       => 'CONCRETE.jpg',
+      'EWS_Laterizio'      => 'BRICK_RED.jpg',
       'EWS_Brick'          => 'BRICK_RED.jpg',
       'EWS_Render_Ext'     => 'STUCCO_LIGHT_TAN.jpg',
       'EWS_Drywall_Board'  => 'GYPSUMW_HORZ.jpg',
       'EWS_Plaster_Int'    => 'STUCCO_LIGHT_TAN.jpg',
+      'EWS_Insulation_EPS' => 'XPS_FOAM_R100_NOBORDER.jpg',
       'EWS_Screed'         => 'CONCRETE.jpg',
       'EWS_Wood_Flooring'  => 'CONCRETE.jpg',
       'EWS_Ceramic_Tile'   => 'CONCRETE.jpg'
@@ -58,7 +60,8 @@ module MMA_WallsAndSlabs
       'CONCRETE.jpg' => [600.0, 600.0],
       'BRICK_RED.jpg' => [600.0, 600.0],
       'STUCCO_LIGHT_TAN.jpg' => [600.0, 600.0],
-      'GYPSUMW_HORZ.jpg' => [600.0, 600.0]
+      'GYPSUMW_HORZ.jpg' => [600.0, 600.0],
+      'XPS_FOAM_R100_NOBORDER.jpg' => [600.0, 600.0]
     }.freeze
   end
 

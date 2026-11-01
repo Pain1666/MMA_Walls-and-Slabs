@@ -28,6 +28,7 @@ module MMA_WallsAndSlabs
       wall1 = WallModel.from_group(wall1_group)
       wall2 = WallModel.from_group(wall2_group)
       return JoinType::NONE unless wall1 && wall2
+      return JoinType::NONE if wall1.path_points || wall2.path_points
 
       a1 = wall1.start_point
       a2 = wall1.end_point
@@ -35,7 +36,7 @@ module MMA_WallsAndSlabs
       b2 = wall2.end_point
 
       if almost_parallel?(a1, a2, b1, b2)
-        return JoinType::CONTINUATION if lines_overlap_2d?(a1, a2, b1, b2)
+        return JoinType::CONTINUATION if shared_endpoint(a1, a2, b1, b2)
         return JoinType::NONE
       end
 
@@ -43,7 +44,11 @@ module MMA_WallsAndSlabs
       return JoinType::NONE unless intersection
 
       if point_on_segment?(intersection, a1, a2) && point_on_segment?(intersection, b1, b2)
-        JoinType::MITER
+        if endpoint_near?(intersection, a1, a2) && endpoint_near?(intersection, b1, b2)
+          JoinType::MITER
+        else
+          JoinType::NONE
+        end
       else
         JoinType::NONE
       end
@@ -102,6 +107,7 @@ module MMA_WallsAndSlabs
       b1 = wall2.start_point
       b2 = wall2.end_point
       intersection = find_segment_intersection_2d(a1, a2, b1, b2)
+      intersection ||= shared_endpoint(a1, a2, b1, b2) if join_type == JoinType::CONTINUATION
       return false unless intersection
 
       if join_type == JoinType::MITER || join_type == JoinType::BUTT || join_type == JoinType::CONTINUATION
@@ -122,14 +128,8 @@ module MMA_WallsAndSlabs
 
         wall1.save_to_group(wall1_group)
         wall2.save_to_group(wall2_group)
-
-        unless wall1.params == WallModel.from_group(wall1_group)&.params
-          WallBuilder.rebuild_wall_from_model(model, wall1_group, wall1)
-        end
-
-        unless wall2.params == WallModel.from_group(wall2_group)&.params
-          WallBuilder.rebuild_wall_from_model(model, wall2_group, wall2)
-        end
+        WallBuilder.rebuild_wall_from_model(model, wall1_group, wall1)
+        WallBuilder.rebuild_wall_from_model(model, wall2_group, wall2)
 
         return true
       end
@@ -183,10 +183,27 @@ module MMA_WallsAndSlabs
       point_on_segment?(intersection, a1, a2) && point_on_segment?(intersection, b1, b2)
     end
 
+    def self.shared_endpoint(a1, a2, b1, b2, tolerance = 1.0)
+      [[a1, b1], [a1, b2], [a2, b1], [a2, b2]].each do |first, second|
+        next if distance_2d(first, second) > tolerance
+
+        return [
+          (first[0].to_f + second[0].to_f) / 2.0,
+          (first[1].to_f + second[1].to_f) / 2.0,
+          (first[2].to_f + second[2].to_f) / 2.0
+        ]
+      end
+      nil
+    end
+
     def self.nearest_endpoint_for_point(wall_model, point)
       d_start = distance_2d(wall_model.start_point, point)
       d_end = distance_2d(wall_model.end_point, point)
       d_start <= d_end ? :start : :end
+    end
+
+    def self.endpoint_near?(point, start_point, end_point, tolerance = 1.0)
+      distance_2d(point, start_point) <= tolerance || distance_2d(point, end_point) <= tolerance
     end
 
     def self.distance_2d(p1, p2)

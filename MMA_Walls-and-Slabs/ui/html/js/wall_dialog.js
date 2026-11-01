@@ -13,60 +13,259 @@ let currentWallData = {
   ],
   openings: []
 };
+let loadedCoreType = currentWallData.core_type;
+let savedWallTypes = [];
+let selectedWallTypeName = '';
+const layerMaterials = {
+  EWS_Concrete: 'Concrete',
+  EWS_Laterizio: 'Hollow clay block (Laterizio / Poroton)',
+  EWS_Brick: 'Solid brick',
+  EWS_Ytong: 'Aerated concrete (Ytong)',
+  EWS_Metal_Stud: 'Metal studs',
+  EWS_Drywall_Board: 'Drywall board',
+  EWS_Insulation_EPS: 'EPS insulation',
+  EWS_Render_Ext: 'Exterior render',
+  EWS_Plaster_Int: 'Interior plaster',
+  EWS_Screed: 'Screed',
+  EWS_Wood_Flooring: 'Wood flooring',
+  EWS_Ceramic_Tile: 'Ceramic tile'
+};
 
 window.addEventListener('DOMContentLoaded', () => {
+  if (window.sketchup && window.sketchup.dialog_ready) window.sketchup.dialog_ready();
+  renderWallData();
+});
+
+function renderWallData() {
+  currentWallData.ext_layers = Array.isArray(currentWallData.ext_layers) ? currentWallData.ext_layers : [];
+  currentWallData.int_layers = Array.isArray(currentWallData.int_layers) ? currentWallData.int_layers : [];
   document.getElementById('wall-height').value = currentWallData.height || 2800;
   document.getElementById('wall-justification').value = currentWallData.justification || 'center';
   document.getElementById('core-type').value = currentWallData.core_type || 'poroton';
+  document.getElementById('core-thickness').value = currentWallData.core_thickness == null ? 250 : currentWallData.core_thickness;
+  renderLayerEditors();
+}
+
+function renderLayerEditors() {
+  const container = document.getElementById('wall-layers');
+  container.replaceChildren();
+  [['Exterior layers', 'ext_layers'], ['Interior layers', 'int_layers']].forEach(([title, key]) => {
+    const section = document.createElement('div');
+    section.className = 'layer-section';
+    const heading = document.createElement('div');
+    heading.className = 'layer-section-title';
+    const label = document.createElement('span');
+    label.textContent = title;
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.textContent = 'Add layer';
+    add.addEventListener('click', () => {
+      currentWallData[key].push({ name: 'New layer', thickness: 10, material: '', enabled: true });
+      renderLayerEditors();
+    });
+    heading.append(label, add);
+    section.appendChild(heading);
+    currentWallData[key].forEach((layer, index) => {
+      const row = document.createElement('div');
+      row.className = 'layer-row';
+      const name = document.createElement('input');
+      name.value = layer.name || '';
+      name.setAttribute('aria-label', `${title} ${index + 1} name`);
+      name.addEventListener('input', () => { layer.name = name.value; });
+      const thickness = document.createElement('input');
+      thickness.type = 'number';
+      thickness.min = '0';
+      thickness.step = '0.1';
+      thickness.value = layer.thickness || 0;
+      thickness.setAttribute('aria-label', `${title} ${index + 1} thickness in mm`);
+      thickness.addEventListener('input', () => { layer.thickness = parseFloat(thickness.value) || 0; });
+      const material = document.createElement('select');
+      material.setAttribute('aria-label', `${title} ${index + 1} material`);
+      const noMaterial = document.createElement('option');
+      noMaterial.value = '';
+      noMaterial.textContent = 'No material';
+      material.appendChild(noMaterial);
+      Object.entries(layerMaterials).forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        material.appendChild(option);
+      });
+      if (layer.material && !Object.prototype.hasOwnProperty.call(layerMaterials, layer.material)) {
+        const option = document.createElement('option');
+        option.value = layer.material;
+        option.textContent = layer.material;
+        material.appendChild(option);
+      }
+      material.value = layer.material || '';
+      material.addEventListener('change', () => { layer.material = material.value; });
+      const enabled = document.createElement('input');
+      enabled.type = 'checkbox';
+      enabled.checked = layer.enabled !== false;
+      enabled.setAttribute('aria-label', `Enable ${title.toLowerCase()} ${index + 1}`);
+      enabled.addEventListener('change', () => { layer.enabled = enabled.checked; });
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', `Remove ${title.toLowerCase()} ${index + 1}`);
+      remove.addEventListener('click', () => {
+        currentWallData[key].splice(index, 1);
+        renderLayerEditors();
+      });
+      row.append(name, thickness, material, enabled, remove);
+      section.appendChild(row);
+    });
+    container.appendChild(section);
+  });
+}
+
+function loadWallData(data, createWall = false, wallTypes = []) {
+  currentWallData = Object.assign({}, currentWallData, data || {});
+  loadedCoreType = currentWallData.core_type;
+  savedWallTypes = Array.isArray(wallTypes) ? wallTypes : [];
+  selectedWallTypeName = '';
+  renderWallTypeOptions();
+  const badge = document.getElementById('mode-badge');
+  badge.textContent = createWall
+    ? 'Create Wall'
+    : (currentWallData.start_point && currentWallData.end_point ? 'Edit Wall' : 'Wall Defaults');
+  document.getElementById('wall-submit').textContent = createWall ? 'Okay' : 'Apply';
+  renderWallData();
+}
+
+function renderWallTypeOptions() {
+  const select = document.getElementById('wall-type-select');
+  select.replaceChildren();
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '-- Select a saved type --';
+  select.appendChild(placeholder);
+  savedWallTypes.forEach(type => {
+    const option = document.createElement('option');
+    option.value = type.name;
+    option.textContent = type.name;
+    select.appendChild(option);
+  });
+  select.value = selectedWallTypeName;
+  document.getElementById('delete-wall-type').disabled = !selectedWallTypeName;
+}
+
+document.getElementById('wall-type-select').addEventListener('change', event => {
+  const wallType = savedWallTypes.find(type => type.name === event.target.value);
+  if (!wallType) {
+    selectedWallTypeName = '';
+    document.getElementById('wall-type-name').value = '';
+    renderWallTypeOptions();
+    return;
+  }
+  selectedWallTypeName = wallType.name;
+  document.getElementById('wall-type-name').value = wallType.name;
+  currentWallData = Object.assign({}, wallType.parameters);
+  currentWallData.wall_type = wallType.name;
+  loadedCoreType = currentWallData.core_type;
+  renderWallTypeOptions();
+  renderWallData();
 });
+
+function newWallType() {
+  selectedWallTypeName = '';
+  document.getElementById('wall-type-name').value = '';
+  currentWallData = {
+    height: 2800,
+    justification: 'center',
+    core_type: 'poroton',
+    core_thickness: 250,
+    core_material: 'EWS_Laterizio',
+    ext_layers: [],
+    int_layers: [],
+    openings: [],
+    wall_type: ''
+  };
+  loadedCoreType = currentWallData.core_type;
+  renderWallTypeOptions();
+  renderWallData();
+}
+
+function readWallForm() {
+  currentWallData.height = parseFloat(document.getElementById('wall-height').value);
+  currentWallData.justification = document.getElementById('wall-justification').value;
+  currentWallData.core_type = document.getElementById('core-type').value;
+  currentWallData.core_thickness = parseFloat(document.getElementById('core-thickness').value);
+  const coreMaterials = {
+    concrete: 'EWS_Concrete',
+    poroton: 'EWS_Laterizio',
+    brick: 'EWS_Brick',
+    aac_block: 'EWS_Ytong',
+    drywall: 'EWS_Metal_Stud'
+  };
+  if (currentWallData.core_type !== loadedCoreType) {
+    currentWallData.core_material = coreMaterials[currentWallData.core_type] || currentWallData.core_material;
+    loadedCoreType = currentWallData.core_type;
+  }
+}
+
+function saveWallType() {
+  const invalid = Array.from(document.querySelectorAll('input')).find(input => !input.checkValidity());
+  if (invalid) {
+    invalid.reportValidity();
+    return;
+  }
+  const name = document.getElementById('wall-type-name').value.trim();
+  if (!name) {
+    window.alert('Enter a wall type name before saving.');
+    document.getElementById('wall-type-name').focus();
+    return;
+  }
+  readWallForm();
+  currentWallData.wall_type = name;
+  if (window.sketchup && window.sketchup.save_wall_type) {
+    window.sketchup.save_wall_type(JSON.stringify({ name, parameters: currentWallData }));
+  } else {
+    window.alert('SketchUp is not connected to the wall settings dialog.');
+  }
+}
+
+function deleteWallType() {
+  if (!selectedWallTypeName) return;
+  if (!window.confirm(`Delete the saved wall type "${selectedWallTypeName}"?`)) return;
+  if (window.sketchup && window.sketchup.delete_wall_type) {
+    window.sketchup.delete_wall_type(selectedWallTypeName);
+  } else {
+    window.alert('SketchUp is not connected to the wall settings dialog.');
+  }
+}
+
+function wallTypesUpdated(wallTypes, deletedName = '', savedName = '') {
+  savedWallTypes = Array.isArray(wallTypes) ? wallTypes : [];
+  if (deletedName && selectedWallTypeName === deletedName) {
+    selectedWallTypeName = '';
+    document.getElementById('wall-type-name').value = '';
+    currentWallData.wall_type = '';
+  }
+  if (savedName) {
+    selectedWallTypeName = savedName;
+    document.getElementById('wall-type-name').value = savedName;
+    currentWallData.wall_type = savedName;
+  }
+  renderWallTypeOptions();
+}
 
 function closeDialog() {
   if (window.sketchup && window.sketchup.close_dialog) window.sketchup.close_dialog();
 }
 
 function submitWall() {
-  currentWallData.height = parseFloat(document.getElementById('wall-height').value) || 2800;
-  currentWallData.justification = document.getElementById('wall-justification').value;
-  currentWallData.core_type = document.getElementById('core-type').value;
+  const invalid = Array.from(document.querySelectorAll('input')).find(input => !input.checkValidity());
+  if (invalid) {
+    invalid.reportValidity();
+    return;
+  }
+  readWallForm();
+  const typedName = document.getElementById('wall-type-name').value.trim();
+  currentWallData.wall_type = selectedWallTypeName || typedName || currentWallData.wall_type || '';
   if (window.sketchup && window.sketchup.create_or_update_wall) {
     window.sketchup.create_or_update_wall(JSON.stringify(currentWallData));
-  }
-}
-
-function applyPreset(key) {
-  switch (key) {
-    case 'ext_laterizio_cappotto':
-      currentWallData.core_type = 'poroton';
-      currentWallData.core_thickness = 250;
-      currentWallData.core_material = 'EWS_Laterizio';
-      currentWallData.ext_layers = [
-        { name: 'Intonaco esterno', thickness: 15, material: 'EWS_Render_Ext', enabled: true },
-        { name: 'Cappotto EPS', thickness: 100, material: 'EWS_Insulation_EPS', enabled: true }
-      ];
-      currentWallData.int_layers = [{ name: 'Intonaco interno', thickness: 15, material: 'EWS_Plaster_Int', enabled: true }];
-      break;
-    case 'ext_concrete_cappotto':
-      currentWallData.core_type = 'concrete';
-      currentWallData.core_thickness = 250;
-      currentWallData.core_material = 'EWS_Concrete';
-      currentWallData.ext_layers = [
-        { name: 'Intonaco esterno', thickness: 15, material: 'EWS_Render_Ext', enabled: true },
-        { name: 'Cappotto EPS', thickness: 140, material: 'EWS_Insulation_EPS', enabled: true }
-      ];
-      currentWallData.int_layers = [{ name: 'Intonaco interno', thickness: 15, material: 'EWS_Plaster_Int', enabled: true }];
-      break;
-    case 'int_laterizio':
-      currentWallData.core_type = 'poroton';
-      currentWallData.core_thickness = 80;
-      currentWallData.core_material = 'EWS_Laterizio';
-      currentWallData.ext_layers = [{ name: 'Intonaco', thickness: 15, material: 'EWS_Plaster_Int', enabled: true }];
-      currentWallData.int_layers = [{ name: 'Intonaco', thickness: 15, material: 'EWS_Plaster_Int', enabled: true }];
-      break;
-    case 'drywall_double':
-      currentWallData.core_type = 'drywall';
-      currentWallData.core_thickness = 75;
-      currentWallData.ext_layers = [];
-      currentWallData.int_layers = [];
-      break;
+  } else {
+    window.alert('SketchUp is not connected to the wall settings dialog.');
   }
 }

@@ -13,18 +13,15 @@
 
   <div class="card">
     <div class="card-title">Opening Dimensions</div>
+    <p class="opening-help">After confirming, place the cursor at the opening's lower-left corner on the wall. Cursor height sets the sill height.</p>
     <div class="form-grid">
       <div class="form-group">
         <label>Width (mm)</label>
-        <input type="number" id="op-width" value="900">
+        <input type="number" id="op-width" value="900" min="1" required>
       </div>
       <div class="form-group">
         <label>Height (mm)</label>
-        <input type="number" id="op-height" value="2100">
-      </div>
-      <div class="form-group">
-        <label>Sill Height (mm)</label>
-        <input type="number" id="op-sill" value="0">
+        <input type="number" id="op-height" value="2100" min="1" required>
       </div>
       <div class="form-group">
         <label>Type</label>

@@ -5,6 +5,7 @@
 
 require 'json'
 require_relative 'constants'
+require_relative 'wall_object'
 require_relative 'wall_builder'
 require_relative 'slab_builder'
 
@@ -20,6 +21,7 @@ module MMA_WallsAndSlabs
       return nil unless data_json
 
       params = JSON.parse(data_json)
+      WallModel.transform_points!(params, wall_group.transformation)
       params['openings'] ||= []
 
       openings.each do |opening|
