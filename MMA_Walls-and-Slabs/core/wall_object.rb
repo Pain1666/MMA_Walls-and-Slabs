@@ -1,122 +1,103 @@
-require_relative '../core/opening_cutter'
-require_relative '../core/wall_object'
-require_relative '../core/wall_builder'
+# frozen_string_literal: true
+# ==============================================================================
+# MMA_Walls-and-Slabs - Wall Builder
+# ==============================================================================
+
+require 'json'
+require_relative 'constants'
+require_relative 'geometry_helper'
+require_relative 'wall_object'
 
 module MMA_WallsAndSlabs
-  class DialogManager
-    @wall_dialog = nil
-    @slab_dialog = nil
+  class WallBuilder
+    def self.serialize_group_data(group, params)
+      WallModel.persist(group, params)
+    end
 
-    @cached_wall_params = {
-      'height' => Defaults::WALL_HEIGHT,
-      'justification' => Defaults::WALL_JUSTIFICATION,
-      'core_type' => CoreType::POROTON,
-      'core_thickness' => Defaults::CORE_THICKNESS[CoreType::POROTON],
-      'core_material' => 'EWS_Laterizio',
-      'wall_type' => WallPresets::GENERIC,
-      'ext_layers' => [
-        { 'name' => 'Intonaco esterno', 'thickness' => 15.0, 'material' => 'EWS_Render_Ext', 'enabled' => true },
-        { 'name' => 'Cappotto EPS', 'thickness' => 100.0, 'material' => 'EWS_Insulation_EPS', 'enabled' => true }
-      ],
-      'int_layers' => [
-        { 'name' => 'Intonaco interno', 'thickness' => 15.0, 'material' => 'EWS_Plaster_Int', 'enabled' => true }
-      ],
-      'openings' => []
-    }
+    def self.rebuild_wall_from_model(model, group, wall_model)
+      return nil unless model && group && group.valid? && wall_model
 
-    @cached_slab_params = {
-      'elevation' => 0.0,
-      'reference' => 'top',
-      'layers' => [
-        { 'name' => 'Wood Parquet', 'thickness' => 15.0, 'material' => 'EWS_Wood_Flooring', 'enabled' => true },
-        { 'name' => 'Screed (Massetto)', 'thickness' => 60.0, 'material' => 'EWS_Screed', 'enabled' => true },
-        { 'name' => 'Acoustic/EPS Foam', 'thickness' => 40.0, 'material' => 'EWS_Insulation_EPS', 'enabled' => true },
-        { 'name' => 'Structural Concrete', 'thickness' => 200.0, 'material' => 'EWS_Concrete', 'enabled' => true }
-      ],
-      'openings' => []
-    }
+      build(model, wall_model.params, group)
+    end
 
-    def self.wall_type_presets
-      WallPresets::ALL.map do |preset|
-        { 'name' => preset, 'layers' => WallTypeCatalog.default_for(preset) }
+    def self.sync_wall_to_group(model, group, params)
+      return nil unless model && group && group.valid?
+
+      group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
+      group.set_attribute(DICT_NAME, ATTR_DATA, JSON.generate(params))
+      build(model, params, group)
+    end
+
+    def self.build(model, params, target_group = nil)
+      return nil if params.nil?
+
+      model_wall = WallModel.new(params)
+      params = model_wall.params
+
+      p0 = params['start_point'] || [0, 0, 0]
+      p1 = params['end_point'] || [100, 0, 0]
+      height_mm = (params['height'] || Defaults::WALL_HEIGHT).to_f
+      height_in = GeometryHelper.mm(height_mm)
+      wall_group = target_group || model.active_entities.add_group
+      entities = wall_group.entities
+      entities.clear! unless target_group.nil?
+      wall_group.name = 'MMA Wall'
+      wall_group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
+      serialize_group_data(wall_group, params)
+
+      p_start = Geom::Point3d.new(GeometryHelper.mm(p0[0]), GeometryHelper.mm(p0[1]), GeometryHelper.mm(p0[2]))
+      p_end = Geom::Point3d.new(GeometryHelper.mm(p1[0]), GeometryHelper.mm(p1[1]), GeometryHelper.mm(p1[2]))
+      vx = p_end - p_start
+      if vx.length < 0.001
+        vx = Geom::Vector3d.new(1, 0, 0)
       end
-    end
+      vy = Geom::Vector3d.new(0, 1, 0)
+      vz = Geom::Vector3d.new(0, 0, 1)
 
-    def self.current_wall_params(p0_mm, p1_mm)
-      params = @cached_wall_params.dup
-      params['start_point'] = p0_mm
-      params['end_point'] = p1_mm
-      params['wall_type'] = WallPresets::GENERIC
-      params
-    end
+      ext_layers = params['ext_layers'] || []
+      int_layers = params['int_layers'] || []
 
-    def self.wall_params_for_group(group)
-      return current_wall_params([0, 0, 0], [1000, 0, 0]) unless group && group.valid?
+      ext_layers.each do |layer|
+        next if layer['enabled'] == false
+        thk = GeometryHelper.mm(layer['thickness'].to_f)
+        next if thk <= 0.001
 
-      wall_model = WallModel.from_group(group)
-      return current_wall_params([0, 0, 0], [1000, 0, 0]) unless wall_model
+        layer_group = entities.add_group
+        layer_group.name = "Ext Layer: #{layer['name']} (#{layer['thickness'].to_f.round}mm)"
+        mat = GeometryHelper.get_or_create_material(model, layer['material'])
+        layer_group.material = mat if mat
 
-      wall_model.params.dup
-    end
+        pts = [
+          p_start,
+          p_end,
+          p_end + vy * thk,
+          p_start + vy * thk
+        ]
+        face = layer_group.entities.add_face(pts)
+        face.pushpull(height_in) if face
+      end
 
-    def self.apply_wall_preset(group, preset_name)
-      return false unless group && group.valid?
+      int_layers.each do |layer|
+        next if layer['enabled'] == false
+        thk = GeometryHelper.mm(layer['thickness'].to_f)
+        next if thk <= 0.001
 
-      wall_model = WallModel.from_group(group)
-      return false unless wall_model
+        layer_group = entities.add_group
+        layer_group.name = "Int Layer: #{layer['name']} (#{layer['thickness'].to_f.round}mm)"
+        mat = GeometryHelper.get_or_create_material(model, layer['material'])
+        layer_group.material = mat if mat
 
-      wall_model.apply_preset(preset_name)
-      wall_model.save_to_group(group)
-      WallBuilder.rebuild_wall_from_model(Sketchup.active_model, group, wall_model)
-      true
-    end
+        pts = [
+          p_start,
+          p_end,
+          p_end + vy * thk,
+          p_start + vy * thk
+        ]
+        face = layer_group.entities.add_face(pts)
+        face.pushpull(height_in) if face
+      end
 
-    def self.current_slab_params(pts_mm)
-      params = @cached_slab_params.dup
-      params['points'] = pts_mm
-      params
-    end
-
-    def self.show_wall_dialog(target_group = nil)
-      html_path = File.join(__dir__, 'html', 'wall_dialog.html')
-      @wall_dialog = UI::HtmlDialog.new(
-        dialog_title: target_group ? 'Edit MMA Wall' : 'MMA Wall Settings',
-        preferences_key: 'com.mmawallsandslabs.walldialog',
-        scrollable: true,
-        resizable: true,
-        width: 520,
-        height: 680
-      )
-      @wall_dialog.set_file(html_path)
-      @wall_dialog.show
-    end
-
-    def self.show_slab_dialog(target_group = nil)
-      html_path = File.join(__dir__, 'html', 'slab_dialog.html')
-      @slab_dialog = UI::HtmlDialog.new(
-        dialog_title: target_group ? 'Edit MMA Slab' : 'MMA Slab Settings',
-        preferences_key: 'com.mmawallsandslabs.slabdialog',
-        scrollable: true,
-        resizable: true,
-        width: 500,
-        height: 600
-      )
-      @slab_dialog.set_file(html_path)
-      @slab_dialog.show
-    end
-
-    def self.show_opening_dialog(target_group = nil)
-      html_path = File.join(__dir__, 'html', 'opening_dialog.html')
-      @opening_dialog = UI::HtmlDialog.new(
-        dialog_title: 'MMA Opening Settings',
-        preferences_key: 'com.mmawallsandslabs.openingdialog',
-        scrollable: true,
-        resizable: true,
-        width: 420,
-        height: 440
-      )
-      @opening_dialog.set_file(html_path)
-      @opening_dialog.show
+      wall_group
     end
   end
 end
