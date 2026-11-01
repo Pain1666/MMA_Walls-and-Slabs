@@ -16,6 +16,7 @@ require_relative 'tools/draw_wall_tool'
 require_relative 'tools/draw_slab_tool'
 require_relative 'tools/opening_tool'
 require_relative 'tools/join_wall_tool'
+require_relative 'tools/edit_wall_tool'
 
 module EuroWallSlab
   unless file_loaded?(__FILE__)
@@ -51,7 +52,17 @@ module EuroWallSlab
     cmd_join_walls.small_icon = File.join(icon_dir, 'join_wall_16.png')
     cmd_join_walls.large_icon = File.join(icon_dir, 'join_wall_24.png')
 
-    # 4. Draw Slab
+    # 4. Edit Wall Points (drag corners, whole walls and layer ends)
+    cmd_edit_walls = UI::Command.new('Edit Wall Points') do
+      Sketchup.active_model.select_tool(EditWallTool.new)
+    end
+    cmd_edit_walls.tooltip = 'Drag wall corners, whole walls, and individual layer ends'
+    cmd_edit_walls.status_bar_text = 'Click a Euro Wall, then drag its green, purple or orange handles'
+    # Reuses the join icon until a dedicated one is added to icons/
+    cmd_edit_walls.small_icon = File.join(icon_dir, 'join_wall_16.png')
+    cmd_edit_walls.large_icon = File.join(icon_dir, 'join_wall_24.png')
+
+    # 5. Draw Slab
     cmd_draw_slab = UI::Command.new('Draw Euro Slab') do
       Sketchup.active_model.select_tool(DrawSlabTool.new)
     end
@@ -60,7 +71,7 @@ module EuroWallSlab
     cmd_draw_slab.small_icon = File.join(icon_dir, 'slab_16.png')
     cmd_draw_slab.large_icon = File.join(icon_dir, 'slab_24.png')
 
-    # 5. Convert Face to Slab
+    # 6. Convert Face to Slab
     cmd_face_to_slab = UI::Command.new('Convert Face to Slab') do
       model = Sketchup.active_model
       faces = model.selection.grep(Sketchup::Face)
@@ -77,7 +88,7 @@ module EuroWallSlab
     cmd_face_to_slab.small_icon = File.join(icon_dir, 'face_slab_16.png')
     cmd_face_to_slab.large_icon = File.join(icon_dir, 'face_slab_24.png')
 
-    # 6. Slab Settings
+    # 7. Slab Settings
     cmd_slab_settings = UI::Command.new('Slab Settings & Presets') do
       DialogManager.show_slab_dialog
     end
@@ -85,7 +96,7 @@ module EuroWallSlab
     cmd_slab_settings.small_icon = File.join(icon_dir, 'slab_settings_16.png')
     cmd_slab_settings.large_icon = File.join(icon_dir, 'slab_settings_24.png')
 
-    # 7. Cut Opening
+    # 8. Cut Opening
     cmd_cut_opening = UI::Command.new('Cut Opening in Wall') do
       DialogManager.show_opening_dialog
     end
@@ -101,6 +112,7 @@ module EuroWallSlab
     menu.add_item(cmd_draw_wall)
     menu.add_item(cmd_wall_settings)
     menu.add_item(cmd_join_walls)
+    menu.add_item(cmd_edit_walls)
     menu.add_separator
     menu.add_item(cmd_draw_slab)
     menu.add_item(cmd_face_to_slab)
@@ -125,6 +137,9 @@ module EuroWallSlab
         sub = context_menu.add_submenu('Euro Wall')
         sub.add_item('Edit Wall Assembly...') do
           DialogManager.show_wall_dialog(wall)
+        end
+        sub.add_item('Edit Wall Points') do
+          Sketchup.active_model.select_tool(EditWallTool.new(wall))
         end
         sub.add_item('Add Opening (Door/Window)...') do
           DialogManager.show_opening_dialog(wall)
@@ -153,6 +168,7 @@ module EuroWallSlab
     toolbar.add_item(cmd_draw_wall)
     toolbar.add_item(cmd_wall_settings)
     toolbar.add_item(cmd_join_walls)
+    toolbar.add_item(cmd_edit_walls)
     toolbar.add_separator
     toolbar.add_item(cmd_draw_slab)
     toolbar.add_item(cmd_face_to_slab)
