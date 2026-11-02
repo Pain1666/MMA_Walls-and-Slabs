@@ -35,15 +35,22 @@ module MMA_WallsAndSlabs
       return unless @input.valid?
 
       update_preview(view, x, y)
-      unless @preview && valid_target?(@target_group)
+      preview = @preview
+      target = @target_group
+      unless preview && target && valid_target?(target)
         Sketchup.status_text = 'MMA Opening Tool: Move the cursor over a MMA wall or slab to preview placement.'
         return
       end
 
-      if WallModel.valid_wall_group?(@target_group)
-        place_wall_opening(@preview)
+      # Release everything that refers to faces before the model changes.
+      @input.clear
+      @preview = nil
+      @target_group = nil
+
+      if WallModel.valid_wall_group?(target)
+        place_wall_opening(target, preview)
       else
-        place_slab_opening(@preview)
+        place_slab_opening(target, preview)
       end
       Sketchup.status_text = 'MMA Opening Tool: Opening placed. Click to place another.'
       view.invalidate
@@ -199,14 +206,14 @@ module MMA_WallsAndSlabs
       }
     end
 
-    def place_wall_opening(preview)
+    def place_wall_opening(group, preview)
       opening = @params.merge(
         'position' => preview[:position],
         'sill_height' => preview[:sill_height],
         'width' => preview[:width],
         'height' => preview[:height]
       )
-      OpeningCutter.add_wall_opening(Sketchup.active_model, @target_group, opening)
+      OpeningCutter.add_wall_opening(Sketchup.active_model, group, opening)
     end
 
     def slab_preview(group, point, width, height)
@@ -223,14 +230,14 @@ module MMA_WallsAndSlabs
       raise ArgumentError, 'Could not read the selected slab.'
     end
 
-    def place_slab_opening(preview)
+    def place_slab_opening(group, preview)
       opening = @params.merge(
         'x' => preview[:x],
         'y' => preview[:y],
         'width' => preview[:width],
         'height' => preview[:height]
       )
-      OpeningCutter.add_slab_opening(Sketchup.active_model, @target_group, opening)
+      OpeningCutter.add_slab_opening(Sketchup.active_model, group, opening)
     end
   end
 end
