@@ -19,16 +19,16 @@ module MMA_WallsAndSlabs
     @cached_wall_params = {
       'height' => Defaults::WALL_HEIGHT,
       'justification' => Defaults::WALL_JUSTIFICATION,
-      'core_type' => CoreType::POROTON,
-      'core_thickness' => Defaults::CORE_THICKNESS[CoreType::POROTON],
-      'core_material' => 'EWS_Laterizio',
+      'core_type' => CoreType::HOLLOW_BRICK,
+      'core_thickness' => Defaults::CORE_THICKNESS[CoreType::HOLLOW_BRICK],
+      'core_material' => 'MMA_Brick',
       'wall_type' => WallPresets::GENERIC,
       'ext_layers' => [
-        { 'name' => 'Intonaco esterno', 'thickness' => 15.0, 'material' => 'EWS_Render_Ext', 'enabled' => true },
-        { 'name' => 'Cappotto EPS', 'thickness' => 100.0, 'material' => 'EWS_Insulation_EPS', 'enabled' => true }
+        { 'name' => 'Intonaco esterno', 'thickness' => 15.0, 'material' => 'MMA_Render_Ext', 'enabled' => true },
+        { 'name' => 'Cappotto EPS', 'thickness' => 100.0, 'material' => 'MMA_Insulation_EPS', 'enabled' => true }
       ],
       'int_layers' => [
-        { 'name' => 'Intonaco interno', 'thickness' => 15.0, 'material' => 'EWS_Plaster_Int', 'enabled' => true }
+        { 'name' => 'Intonaco interno', 'thickness' => 15.0, 'material' => 'MMA_Plaster_Int', 'enabled' => true }
       ],
       'openings' => []
     }
@@ -37,10 +37,10 @@ module MMA_WallsAndSlabs
       'elevation' => 0.0,
       'reference' => 'top',
       'layers' => [
-        { 'name' => 'Wood Parquet', 'thickness' => 15.0, 'material' => 'EWS_Wood_Flooring', 'enabled' => true },
-        { 'name' => 'Screed (Massetto)', 'thickness' => 60.0, 'material' => 'EWS_Screed', 'enabled' => true },
-        { 'name' => 'Acoustic/EPS Foam', 'thickness' => 40.0, 'material' => 'EWS_Insulation_EPS', 'enabled' => true },
-        { 'name' => 'Structural Concrete', 'thickness' => 200.0, 'material' => 'EWS_Concrete', 'enabled' => true }
+        { 'name' => 'Wood Parquet', 'thickness' => 15.0, 'material' => 'MMA_Wood_Flooring', 'enabled' => true },
+        { 'name' => 'Screed (Massetto)', 'thickness' => 60.0, 'material' => 'MMA_Screed', 'enabled' => true },
+        { 'name' => 'Acoustic/EPS Foam', 'thickness' => 40.0, 'material' => 'MMA_Insulation_EPS', 'enabled' => true },
+        { 'name' => 'Structural Concrete', 'thickness' => 200.0, 'material' => 'MMA_Concrete', 'enabled' => true }
       ],
       'openings' => []
     }

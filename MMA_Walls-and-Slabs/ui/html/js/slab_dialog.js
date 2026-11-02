@@ -3,10 +3,10 @@ let currentSlabData = {
   elevation: 0,
   reference: 'top',
   layers: [
-    { name: 'Wood Parquet', thickness: 15, material: 'EWS_Wood_Flooring', enabled: true },
-    { name: 'Screed (Massetto)', thickness: 60, material: 'EWS_Screed', enabled: true },
-    { name: 'Acoustic/EPS Foam', thickness: 40, material: 'EWS_Insulation_EPS', enabled: true },
-    { name: 'Structural Concrete', thickness: 200, material: 'EWS_Concrete', enabled: true }
+    { name: 'Wood Parquet', thickness: 15, material: 'MMA_Wood_Flooring', enabled: true },
+    { name: 'Screed (Massetto)', thickness: 60, material: 'MMA_Screed', enabled: true },
+    { name: 'Acoustic/EPS Foam', thickness: 40, material: 'MMA_Insulation_EPS', enabled: true },
+    { name: 'Structural Concrete', thickness: 200, material: 'MMA_Concrete', enabled: true }
   ],
   openings: []
 };

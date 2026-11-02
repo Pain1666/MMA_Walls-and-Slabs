@@ -1,15 +1,15 @@
 let currentWallData = {
   height: 2800,
   justification: 'center',
-  core_type: 'poroton',
+  core_type: 'hollow_brick',
   core_thickness: 250,
-  core_material: 'EWS_Laterizio',
+  core_material: 'MMA_Brick',
   ext_layers: [
-    { name: 'Intonaco esterno', thickness: 15, material: 'EWS_Render_Ext', enabled: true },
-    { name: 'Cappotto EPS', thickness: 100, material: 'EWS_Insulation_EPS', enabled: true }
+    { name: 'Intonaco esterno', thickness: 15, material: 'MMA_Render_Ext', enabled: true },
+    { name: 'Cappotto EPS', thickness: 100, material: 'MMA_Insulation_EPS', enabled: true }
   ],
   int_layers: [
-    { name: 'Intonaco interno', thickness: 15, material: 'EWS_Plaster_Int', enabled: true }
+    { name: 'Intonaco interno', thickness: 15, material: 'MMA_Plaster_Int', enabled: true }
   ],
   openings: []
 };
@@ -17,18 +17,20 @@ let loadedCoreType = currentWallData.core_type;
 let savedWallTypes = [];
 let selectedWallTypeName = '';
 const layerMaterials = {
-  EWS_Concrete: 'Concrete',
-  EWS_Laterizio: 'Hollow clay block (Laterizio / Poroton)',
-  EWS_Brick: 'Solid brick',
-  EWS_Ytong: 'Aerated concrete (Ytong)',
-  EWS_Metal_Stud: 'Metal studs',
-  EWS_Drywall_Board: 'Drywall board',
-  EWS_Insulation_EPS: 'EPS insulation',
-  EWS_Render_Ext: 'Exterior render',
-  EWS_Plaster_Int: 'Interior plaster',
-  EWS_Screed: 'Screed',
-  EWS_Wood_Flooring: 'Wood flooring',
-  EWS_Ceramic_Tile: 'Ceramic tile'
+  MMA_Concrete: 'Concrete',
+  MMA_Brick: 'Solid brick',
+  MMA_Concrete_Block: 'Hollow concrete block',
+  MMA_Metal_Stud: 'Metal studs',
+  MMA_Drywall_Board: 'Drywall board',
+  MMA_Insulation_EPS: 'EPS insulation',
+  MMA_Render_Ext: 'Exterior render',
+  MMA_Plaster_Int: 'Interior plaster',
+  MMA_Screed: 'Screed',
+  MMA_Wood_Flooring: 'Wood flooring',
+  MMA_Ceramic_Tile: 'Ceramic tile',
+  MMA_Stone_Dark: 'Stone - dark',
+  MMA_Stone_Light: 'Stone - light',
+  MMA_Stone_Flooring: 'Stone flooring'
 };
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -41,7 +43,7 @@ function renderWallData() {
   currentWallData.int_layers = Array.isArray(currentWallData.int_layers) ? currentWallData.int_layers : [];
   document.getElementById('wall-height').value = currentWallData.height || 2800;
   document.getElementById('wall-justification').value = currentWallData.justification || 'center';
-  document.getElementById('core-type').value = currentWallData.core_type || 'poroton';
+  document.getElementById('core-type').value = currentWallData.core_type || 'hollow_brick';
   document.getElementById('core-thickness').value = currentWallData.core_thickness == null ? 250 : currentWallData.core_thickness;
   renderLayerEditors();
 }
@@ -173,9 +175,9 @@ function newWallType() {
   currentWallData = {
     height: 2800,
     justification: 'center',
-    core_type: 'poroton',
+    core_type: 'hollow_brick',
     core_thickness: 250,
-    core_material: 'EWS_Laterizio',
+    core_material: 'MMA_Brick',
     ext_layers: [],
     int_layers: [],
     openings: [],
@@ -192,11 +194,11 @@ function readWallForm() {
   currentWallData.core_type = document.getElementById('core-type').value;
   currentWallData.core_thickness = parseFloat(document.getElementById('core-thickness').value);
   const coreMaterials = {
-    concrete: 'EWS_Concrete',
-    poroton: 'EWS_Laterizio',
-    brick: 'EWS_Brick',
-    aac_block: 'EWS_Ytong',
-    drywall: 'EWS_Metal_Stud'
+    concrete: 'MMA_Concrete',
+    hollow_brick: 'MMA_Brick',
+    brick: 'MMA_Brick',
+    concrete_block: 'MMA_Concrete_Block',
+    drywall: 'MMA_Metal_Stud'
   };
   if (currentWallData.core_type !== loadedCoreType) {
     currentWallData.core_material = coreMaterials[currentWallData.core_type] || currentWallData.core_material;
