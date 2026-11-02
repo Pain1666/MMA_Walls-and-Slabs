@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 # ==============================================================================
-# MMA_Walls-and-Slabs - Main Plugin Loader & Menu/Toolbar Setup
+# MMA_Walls-and-Slabs - Main Plugin Loader & Menu/Toolbar Setup update 2.0
 # ==============================================================================
 
 require 'sketchup.rb'
