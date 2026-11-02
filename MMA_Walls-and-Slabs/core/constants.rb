@@ -11,61 +11,62 @@ module MMA_WallsAndSlabs
   PLUGIN_DATA_VERSION = '1.1.0'
 
   module CoreType
-    CONCRETE        = 'concrete'
+    CONCRETE   = 'concrete'
     HOLLOW_BRICK    = 'hollow_brick'
-    BRICK           = 'brick'
+    BRICK      = 'brick'
     CONCRETE_BLOCK  = 'concrete_block'
-    DRYWALL         = 'drywall'
+    DRYWALL    = 'drywall'
 
     ALL = [CONCRETE, HOLLOW_BRICK, BRICK, CONCRETE_BLOCK, DRYWALL].freeze
 
     LABELS = {
-      CONCRETE       => 'Reinforced Concrete Wall',
+      CONCRETE  => 'Reinforced Concrete Wall',
       HOLLOW_BRICK   => 'Hollow Clay Block',
-      BRICK          => 'Solid Brick',
+      BRICK     => 'Solid Brick',
       CONCRETE_BLOCK => 'Hollow Concrete Block',
-      DRYWALL        => 'Drywall Partition'
+      DRYWALL   => 'Drywall Partition'
     }.freeze
   end
 
-  # Material names, colours and textures follow the "Sketchup Extension Materials" sheet.
+  # Material list from the "Sketchup Extension Materials" sheet.
+  # Colour (RGB) and texture file are inside the extension's materials folder.
   module DefaultMaterials
     PALETTE = {
-      'MMA_Concrete'       => [190, 192, 195],
-      'MMA_Brick'          => [168, 52, 38],
-      'MMA_Concrete_Block' => [230, 230, 225],
-      'MMA_Metal_Stud'     => [118, 134, 150],
-      'MMA_Drywall_Board'  => [232, 228, 218],
-      'MMA_Insulation_EPS' => [246, 238, 115],
-      'MMA_Render_Ext'     => [240, 236, 226],
-      'MMA_Plaster_Int'    => [250, 250, 248],
-      'MMA_Screed'         => [155, 155, 155],
-      'MMA_Wood_Flooring'  => [192, 145, 88],
-      'MMA_Ceramic_Tile'   => [145, 135, 125],
-      'MMA_Stone_Dark'     => [45, 45, 45],
-      'MMA_Stone_Light'    => [170, 170, 170],
-      'MMA_Stone_Flooring' => [170, 170, 170]
+      'MMA_Concrete'        => [190, 192, 195],
+      'MMA_Brick'           => [168, 52, 38],
+      'MMA_Concrete_Block'  => [230, 230, 225],
+      'MMA_Metal_Stud'      => [118, 134, 150],
+      'MMA_Drywall_Board'   => [232, 228, 218],
+      'MMA_Insulation_EPS'  => [246, 238, 115],
+      'MMA_Render_Ext'      => [240, 236, 226],
+      'MMA_Plaster_Int'     => [250, 250, 248],
+      'MMA_Screed'          => [155, 155, 155],
+      'MMA_Wood_Flooring'   => [192, 145, 88],
+      'MMA_Ceramic_Tile'    => [145, 135, 125],
+      'MMA_Stone_Dark'      => [45, 45, 45],
+      'MMA_Stone_Light'     => [170, 170, 170],
+      'MMA_Stone_Flooring'  => [170, 170, 170]
     }.freeze
 
+    # Texture file for each material. Files not yet verified in the folder are marked in the notes.
     TEXTURE_FILES = {
-      'MMA_Concrete'       => 'Concrete_01.png',
-      'MMA_Brick'          => 'Brick_01.png',
-      'MMA_Concrete_Block' => 'Concrete_Block_01.jpg',
-      'MMA_Metal_Stud'     => 'Metal_01.png',
-      'MMA_Drywall_Board'  => 'Plaster_Int_01.jpg',
-      'MMA_Insulation_EPS' => 'Wool-insulation_01.jpg',
-      'MMA_Render_Ext'     => 'Plaster_Ext_01.jpg',
-      'MMA_Plaster_Int'    => 'Plaster_Int_01.jpg',
-      'MMA_Screed'         => 'Concrete_02.jpg',
-      'MMA_Wood_Flooring'  => 'Wood_01.png',
-      'MMA_Ceramic_Tile'   => 'Ceramic_Tiles_01.png',
-      'MMA_Stone_Dark'     => 'Stone_01.jpg',
-      'MMA_Stone_Light'    => 'Stone_02.jpg',
-      'MMA_Stone_Flooring' => 'Stone_03.jpg'
+      'MMA_Concrete'        => 'Concrete_01.png',
+      'MMA_Brick'           => 'Brick_01.png',
+      'MMA_Concrete_Block'  => 'Concrete_Block_01.jpg',
+      'MMA_Metal_Stud'      => 'Metal_01.png',
+      'MMA_Drywall_Board'   => 'Plaster_Int_01.jpg',
+      'MMA_Insulation_EPS'  => 'Wool-insulation_01.jpg',
+      'MMA_Render_Ext'      => 'Plaster_Ext_01.jpg',
+      'MMA_Plaster_Int'     => 'Plaster_Int_01.jpg',
+      'MMA_Screed'          => 'Concrete_02.jpg',
+      'MMA_Wood_Flooring'   => 'Wood_01.png',
+      'MMA_Ceramic_Tile'    => 'Ceramic_Tiles_01.png',
+      'MMA_Stone_Dark'      => 'Stone_01.jpg',
+      'MMA_Stone_Light'     => 'Stone_02.png',
+      'MMA_Stone_Flooring'  => 'Stone_03.jpg'
     }.freeze
 
-    # Real-world size covered by one texture, in mm (width x height).
-    # Files without an entry use SketchUp's default texture scale.
+    # Tile size in mm for each texture file. Textures not listed here use SketchUp's default scale.
     TEXTURE_SIZES = {
       'Concrete_01.png'        => [1000.0, 1000.0],
       'Brick_01.png'           => [900.0, 900.0],
@@ -74,7 +75,12 @@ module MMA_WallsAndSlabs
       'Plaster_Int_01.jpg'     => [980.0, 1024.0],
       'Wool-insulation_01.jpg' => [900.0, 805.0],
       'Concrete_02.jpg'        => [600.0, 600.0],
-      'Stone_01.jpg'           => [1200.0, 2400.0]
+      'Stone_01.jpg'           => [1200.0, 2400.0],
+      'Stone_02.png'           => [1861.0, 1186.0],
+      'Metal_01.png'           => [600.0, 600.0],
+      'Wood_01.png'            => [1000.0, 1000.0],
+      'Ceramic_Tiles_01.png'   => [600.0, 600.0],
+      'Stone_03.jpg'           => [600.0, 1067.0]
     }.freeze
   end
 
