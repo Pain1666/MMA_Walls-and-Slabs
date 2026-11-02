@@ -28,7 +28,7 @@ module MMA_WallsAndSlabs
       raise ArgumentError, 'A slab requires at least three points.' if points.length < 3
 
       layers = Array(params['layers']).select { |layer| layer.is_a?(Hash) && layer['enabled'] != false }
-      layers = [{ 'name' => 'Concrete Slab', 'thickness' => 200.0, 'material' => 'EWS_Concrete', 'enabled' => true }] if layers.empty?
+      layers = [{ 'name' => 'Concrete Slab', 'thickness' => 200.0, 'material' => 'MMA_Concrete', 'enabled' => true }] if layers.empty?
       layers = layers.select { |layer| layer['thickness'].to_f > 0.001 }
       raise ArgumentError, 'The slab must have at least one layer with positive thickness.' if layers.empty?
 

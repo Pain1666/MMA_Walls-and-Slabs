@@ -7,24 +7,23 @@ require 'json'
 require_relative 'constants'
 
 module MMA_WallsAndSlabs
-  PLUGIN_DATA_VERSION = '1.1.0'
 
   class WallModel
     DEFAULT_WALL_PARAMS = {
       'height' => Defaults::WALL_HEIGHT,
       'justification' => Defaults::WALL_JUSTIFICATION,
-      'core_type' => CoreType::POROTON,
-      'core_thickness' => Defaults::CORE_THICKNESS[CoreType::POROTON],
-      'core_material' => 'EWS_Laterizio',
+      'core_type' => CoreType::HOLLOW_BRICK,
+      'core_thickness' => Defaults::CORE_THICKNESS[CoreType::HOLLOW_BRICK],
+      'core_material' => 'MMA_Brick',
       'wall_type' => WallPresets::GENERIC,
       'start_point' => [0.0, 0.0, 0.0],
       'end_point' => [1000.0, 0.0, 0.0],
       'ext_layers' => [
-        { 'name' => 'Exterior render', 'thickness' => 15.0, 'material' => 'EWS_Render_Ext', 'enabled' => true },
-        { 'name' => 'Insulation', 'thickness' => 100.0, 'material' => 'EWS_Insulation_EPS', 'enabled' => true }
+        { 'name' => 'Exterior render', 'thickness' => 15.0, 'material' => 'MMA_Render_Ext', 'enabled' => true },
+        { 'name' => 'Insulation', 'thickness' => 100.0, 'material' => 'MMA_Insulation_EPS', 'enabled' => true }
       ],
       'int_layers' => [
-        { 'name' => 'Interior plaster', 'thickness' => 15.0, 'material' => 'EWS_Plaster_Int', 'enabled' => true }
+        { 'name' => 'Interior plaster', 'thickness' => 15.0, 'material' => 'MMA_Plaster_Int', 'enabled' => true }
       ],
       'openings' => []
     }.freeze
@@ -152,11 +151,10 @@ module MMA_WallsAndSlabs
         @params['core_thickness'] = core_layer['thickness'].to_f
         @params['core_material'] = core_layer['material']
         @params['core_type'] = {
-          'EWS_Concrete' => CoreType::CONCRETE,
-          'EWS_Laterizio' => CoreType::POROTON,
-          'EWS_Brick' => CoreType::BRICK,
-          'EWS_Ytong' => CoreType::AAC_BLOCK,
-          'EWS_Metal_Stud' => CoreType::DRYWALL
+          'MMA_Concrete' => CoreType::CONCRETE,
+          'MMA_Brick' => CoreType::HOLLOW_BRICK,
+          'MMA_Concrete_Block' => CoreType::CONCRETE_BLOCK,
+          'MMA_Metal_Stud' => CoreType::DRYWALL
         }[@params['core_material']] || @params['core_type']
         core_index = layers.index(core_layer)
         @params['ext_layers'] = layers[0...core_index]
