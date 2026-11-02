@@ -6,10 +6,15 @@
 require 'json'
 require_relative 'constants'
 require_relative 'geometry_helper'
+require_relative 'joint_geometry'
+require_relative 'wall_object'
 
 module MMA_WallsAndSlabs
   class WallBuilder
     def self.serialize_group_data(group, params)
+      unless group.get_attribute(DICT_NAME, ATTR_VERSION) == PLUGIN_DATA_VERSION
+        group.set_attribute(DICT_NAME, ATTR_VERSION, PLUGIN_DATA_VERSION)
+      end
       payload = JSON.generate(params)
       existing = group.get_attribute(DICT_NAME, ATTR_DATA)
       return if existing == payload
@@ -75,12 +80,22 @@ module MMA_WallsAndSlabs
         layer['enabled'] != false && layer['thickness'].to_f > 0.001
       end
       wall_layers = wall_layer_specs.map(&:first)
+
+      # Joints are only meaningful for open walls. Keep the stored links unless
+      # the caller supplies new ones.
+      joints = closed ? {} : resolve_joints(params, target_group)
       path_params = params.merge(
         'start_point' => path_points.first,
         'end_point' => path_points.last,
         'path_points' => path_points,
         'path_closed' => closed
       )
+      if joints.empty?
+        path_params.delete('joints')
+      else
+        path_params['joints'] = joints
+      end
+
       model.start_operation('Build MMA Wall Path', true)
       operation_started = true
       path_group = target_group || model.active_entities.add_group
@@ -89,6 +104,8 @@ module MMA_WallsAndSlabs
       path_group.name = closed ? 'MMA Wall Path (closed)' : 'MMA Wall Path'
       path_group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
       serialize_group_data(path_group, path_params)
+
+      corner_table = joint_corners(model, path_group, path_params, path_points, closed)
 
       total_thickness = wall_layers.sum { |layer| layer['thickness'].to_f }
       path_length = segment_count.times.sum do |index|
@@ -110,7 +127,8 @@ module MMA_WallsAndSlabs
         length = point_distance_2d(start_point, end_point)
         local_openings = path_openings_for_segment(params, cumulative_distance, length, path_length, closed)
         segment_params = params.merge('openings' => local_openings)
-        build_path_segment(segment_params, path_points, directions, index, layer_groups, wall_layer_specs, closed, total_thickness)
+        build_path_segment(segment_params, path_points, directions, index, layer_groups, wall_layer_specs,
+                           closed, total_thickness, corner_table)
         cumulative_distance += length
       end
 
@@ -120,6 +138,97 @@ module MMA_WallsAndSlabs
     rescue StandardError
       model.abort_operation if operation_started
       raise
+    end
+
+    # Joints saved on a wall, used when the caller does not pass its own.
+    def self.resolve_joints(params, target_group)
+      source = if params.key?('joints')
+                 params['joints']
+               elsif target_group && target_group.valid?
+                 stored_joints(target_group)
+               end
+      source.is_a?(Hash) ? source.dup : {}
+    end
+
+    def self.stored_joints(group)
+      raw = group.get_attribute(DICT_NAME, ATTR_DATA)
+      return nil unless raw
+
+      JSON.parse(raw)['joints']
+    rescue JSON::ParserError
+      nil
+    end
+
+    # Offsets of every layer boundary from the centre line, in the wall's own
+    # path frame (left of travel is positive). Length = enabled layers + 1.
+    def self.boundary_offsets(params)
+      layers = wall_layers(params).select { |layer| layer['enabled'] != false && layer['thickness'].to_f > 0.001 }
+      total = layers.sum { |layer| layer['thickness'].to_f }
+      offset = case params['justification'].to_s
+               when WallJustification::LEFT then 0.0
+               when WallJustification::RIGHT then -total
+               else -total / 2.0
+               end
+      offsets = [offset]
+      layers.each do |layer|
+        offset += layer['thickness'].to_f
+        offsets << offset
+      end
+      offsets
+    end
+
+    # Mitred corners at each end of an open wall that is joined to another wall.
+    # Returns { 'start' => [[x, y], ...], 'end' => [[x, y], ...] }, one point per
+    # layer boundary. Only used when both walls agree on the link (mutual check).
+    def self.joint_corners(model, own_group, params, path_points, closed)
+      joints = params['joints']
+      return {} if closed || model.nil? || own_group.nil? || !joints.is_a?(Hash) || joints.empty?
+
+      own_offsets = boundary_offsets(params)
+      total = own_offsets.last - own_offsets.first
+      limit = JointGeometry::MITRE_LIMIT_FACTOR * [total, 1.0].max
+      own_id = own_group.persistent_id
+      table = {}
+
+      %w[start end].each do |end_key|
+        joint = joints[end_key]
+        next unless joint.is_a?(Hash)
+
+        neighbour = find_wall_group(model, joint['uid'].to_i)
+        next if neighbour.nil? || neighbour == own_group
+
+        other = WallModel.from_group(neighbour)
+        next unless other && other.path_points && !other.path_closed?
+
+        other_end = joint['other_end'].to_s
+        back = other.params['joints'].is_a?(Hash) ? other.params['joints'][other_end] : nil
+        next unless back.is_a?(Hash) && back['uid'].to_i == own_id && back['other_end'].to_s == end_key
+
+        at_start = end_key == 'start'
+        other_at_start = other_end == 'start'
+        other_path = other.path_points
+        own_point = at_start ? path_points.first : path_points.last
+        other_point = other_at_start ? other_path.first : other_path.last
+        own_dir = JointGeometry.path_direction(path_points, at_start)
+        other_dir = JointGeometry.path_direction(other_path, other_at_start)
+        next unless own_dir && other_dir
+
+        joint_point = [(own_point[0] + other_point[0]) / 2.0, (own_point[1] + other_point[1]) / 2.0]
+        table[end_key] = JointGeometry.boundary_corners(
+          own_point, JointGeometry.left_normal(own_dir), own_offsets,
+          other_point, JointGeometry.left_normal(other_dir), boundary_offsets(other.params),
+          joint_point, limit
+        )
+      end
+      table
+    end
+
+    def self.find_wall_group(model, persistent_id)
+      return nil unless model && persistent_id.is_a?(Integer) && persistent_id.positive?
+
+      model.entities.grep(Sketchup::Group).find do |group|
+        group.valid? && group.persistent_id == persistent_id && WallModel.valid_wall_group?(group)
+      end
     end
 
     def self.path_openings_for_segment(params, segment_start, segment_length, path_length, closed)
@@ -139,7 +248,8 @@ module MMA_WallsAndSlabs
       end
     end
 
-    def self.build_path_segment(params, path_points, directions, index, layer_groups, layer_specs, closed, total_thickness)
+    def self.build_path_segment(params, path_points, directions, index, layer_groups, layer_specs,
+                                closed, total_thickness, joint_table = {})
       height_mm = (params['height'] || Defaults::WALL_HEIGHT).to_f
       raise ArgumentError, 'Wall height must be greater than zero.' unless height_mm.positive?
 
@@ -158,6 +268,9 @@ module MMA_WallsAndSlabs
       direction = directions[index]
       length = Math.sqrt((end_point[0] - start_point[0])**2 + (end_point[1] - start_point[1])**2)
 
+      start_corners = index.zero? ? joint_table['start'] : nil
+      end_corners = index == path_points.length - 2 ? joint_table['end'] : nil
+
       offset = base_offset
       layer_specs.each_with_index do |(layer, source_index), layer_index|
         thickness = layer['thickness'].to_f
@@ -168,14 +281,27 @@ module MMA_WallsAndSlabs
         low_end = path_offset_point(path_points, directions, segment_end_index, offset, closed, max_miter_distance)
         high_start = path_offset_point(path_points, directions, index, offset + thickness, closed, max_miter_distance)
         high_end = path_offset_point(path_points, directions, segment_end_index, offset + thickness, closed, max_miter_distance)
+
+        # Joined ends use the mitred corners shared with the neighbouring wall.
+        start_joined = joint_pair?(start_corners, layer_index)
+        end_joined = joint_pair?(end_corners, layer_index)
+        if start_joined
+          low_start = joint_point(start_corners[layer_index], start_point)
+          high_start = joint_point(start_corners[layer_index + 1], start_point)
+        end
+        if end_joined
+          low_end = joint_point(end_corners[layer_index], end_point)
+          high_end = joint_point(end_corners[layer_index + 1], end_point)
+        end
+
         unless closed
           start_extension = Array(params['layer_start_extensions'])[source_index].to_f
           end_extension = Array(params['layer_end_extensions'])[source_index].to_f
-          if index.zero? && !start_extension.zero?
+          if index.zero? && !start_extension.zero? && !start_joined
             low_start = extend_path_endpoint(low_start, directions[index], start_extension, true)
             high_start = extend_path_endpoint(high_start, directions[index], start_extension, true)
           end
-          if index == path_points.length - 2 && !end_extension.zero?
+          if index == path_points.length - 2 && !end_extension.zero? && !end_joined
             low_end = extend_path_endpoint(low_end, directions[index], end_extension, false)
             high_end = extend_path_endpoint(high_end, directions[index], end_extension, false)
           end
@@ -207,6 +333,14 @@ module MMA_WallsAndSlabs
         end
         offset += thickness
       end
+    end
+
+    def self.joint_pair?(corners, layer_index)
+      !corners.nil? && !corners[layer_index].nil? && !corners[layer_index + 1].nil?
+    end
+
+    def self.joint_point(xy, reference)
+      [xy[0], xy[1], reference[2]]
     end
 
     def self.extend_path_endpoint(point, direction, distance, start)

@@ -1,11 +1,15 @@
 # frozen_string_literal: true
 # ==============================================================================
-# MMA_Walls-and-Slabs - Wall Joiner Engine
+# MMA_Walls-and-Slabs - Wall Joiner
+# Joins two open path walls at one end each. The two centre lines are trimmed
+# or extended to meet, and every layer is mitred at the corner (see
+# WallBuilder.joint_corners). Links are stored on both walls and only trusted
+# when both sides agree.
 # ==============================================================================
 
 require 'json'
 require_relative 'constants'
-require_relative 'geometry_helper'
+require_relative 'joint_geometry'
 require_relative 'wall_object'
 require_relative 'wall_builder'
 
@@ -13,203 +17,177 @@ module MMA_WallsAndSlabs
   module JoinType
     NONE = 'none'
     MITER = 'miter'
-    BUTT = 'butt'
-    OVERLAP = 'overlap'
     CONTINUATION = 'continuation'
   end
 
   class WallJoiner
-    NEARBY_WALLS_MAX_DISTANCE_MM = 2500.0
+    MAX_JOINT_DISTANCE_MM = 3000.0   # max trim/extension of a wall to reach the joint
+    MIN_SEGMENT_MM = 1.0             # a wall may not be trimmed shorter than this
+    COLLINEAR_TOLERANCE_MM = 5.0     # end-to-end walls must sit on one line within this
+    PARALLEL_DETERMINANT = 1e-3      # |det| below this = parallel centre lines
+    ENDS = [:start, :end].freeze
 
-    def self.detect_wall_join(model, wall1_group, wall2_group)
-      return JoinType::NONE unless wall1_group && wall1_group.valid? && wall2_group && wall2_group.valid?
-      return JoinType::NONE if wall1_group == wall2_group
-
-      wall1 = WallModel.from_group(wall1_group)
-      wall2 = WallModel.from_group(wall2_group)
-      return JoinType::NONE unless wall1 && wall2
-      return JoinType::NONE if wall1.path_points || wall2.path_points
-
-      a1 = wall1.start_point
-      a2 = wall1.end_point
-      b1 = wall2.start_point
-      b2 = wall2.end_point
-
-      if almost_parallel?(a1, a2, b1, b2)
-        return JoinType::CONTINUATION if shared_endpoint(a1, a2, b1, b2)
-        return JoinType::NONE
-      end
-
-      intersection = find_segment_intersection_2d(a1, a2, b1, b2)
-      return JoinType::NONE unless intersection
-
-      if point_on_segment?(intersection, a1, a2) && point_on_segment?(intersection, b1, b2)
-        if endpoint_near?(intersection, a1, a2) && endpoint_near?(intersection, b1, b2)
-          JoinType::MITER
-        else
-          JoinType::NONE
-        end
-      else
-        JoinType::NONE
-      end
+    # Used by JoinWallTool: returns JoinType::MITER, CONTINUATION or NONE.
+    def self.detect_wall_join(_model, wall1_group, wall2_group)
+      candidate = best_candidate(wall1_group, wall2_group)
+      candidate ? candidate[:type] : JoinType::NONE
     end
 
-    def self.refresh_adjacent_joins(model, wall_group, max_distance = NEARBY_WALLS_MAX_DISTANCE_MM)
-      return false unless model && wall_group && wall_group.valid?
-
-      wall_model = WallModel.from_group(wall_group)
-      return false unless wall_model
-
-      nearby_wall_groups(model, wall_group, wall_model, max_distance).each do |other|
-        next if other == wall_group
-        next unless WallModel.valid_wall_group?(other)
-
-        join_type = detect_wall_join(model, wall_group, other)
-        next if join_type == JoinType::NONE
-
-        apply_join(model, wall_group, other, join_type)
-      end
-
-      true
-    end
-
-    def self.nearby_wall_groups(model, wall_group, wall_model = nil, max_distance = NEARBY_WALLS_MAX_DISTANCE_MM)
-      return [] unless model && wall_group && wall_group.valid?
-
-      anchor = wall_model || WallModel.from_group(wall_group)
-      return [] unless anchor
-
-      anchor_mid = anchor.midpoint
-      model.entities.grep(Sketchup::Group).each_with_object([]) do |other, matches|
-        next if other == wall_group
-        next unless WallModel.valid_wall_group?(other)
-
-        candidate = WallModel.from_group(other)
-        next unless candidate
-        next if distance_2d(anchor_mid, candidate.midpoint) > max_distance
-
-        matches << other
-      end
-    end
-
+    # Used by JoinWallTool: joins the two closest ends. Returns true on success.
     def self.apply_join(model, wall1_group, wall2_group, join_type = nil)
-      return false unless wall1_group && wall1_group.valid? && wall2_group && wall2_group.valid?
-
-      join_type ||= detect_wall_join(model, wall1_group, wall2_group)
+      candidate = best_candidate(wall1_group, wall2_group)
+      return false unless candidate
       return false if join_type == JoinType::NONE
 
-      wall1 = WallModel.from_group(wall1_group)
-      wall2 = WallModel.from_group(wall2_group)
-      return false unless wall1 && wall2
+      join_ends(model, wall1_group, candidate[:end1], wall2_group, candidate[:end2])
+    end
 
-      a1 = wall1.start_point
-      a2 = wall1.end_point
-      b1 = wall2.start_point
-      b2 = wall2.end_point
-      intersection = find_segment_intersection_2d(a1, a2, b1, b2)
-      intersection ||= shared_endpoint(a1, a2, b1, b2) if join_type == JoinType::CONTINUATION
-      return false unless intersection
+    # Re-solves every stored joint of a wall (e.g. after it was edited).
+    # Joints that no longer hold are removed from both walls.
+    def self.refresh_adjacent_joins(model, wall_group, _unused = nil)
+      return false unless model && WallModel.valid_wall_group?(wall_group)
 
-      if join_type == JoinType::MITER || join_type == JoinType::BUTT || join_type == JoinType::CONTINUATION
-        wall1_nearest = nearest_endpoint_for_point(wall1, intersection)
-        wall2_nearest = nearest_endpoint_for_point(wall2, intersection)
+      wall = WallModel.from_group(wall_group)
+      return false unless wall
 
-        if wall1_nearest == :start
-          wall1.set_start_point(intersection)
-        else
-          wall1.set_end_point(intersection)
-        end
+      joints = wall.params['joints']
+      return true unless joints.is_a?(Hash)
 
-        if wall2_nearest == :start
-          wall2.set_start_point(intersection)
-        else
-          wall2.set_end_point(intersection)
-        end
+      joints.keys.each do |end_key|
+        joint = joints[end_key]
+        next unless joint.is_a?(Hash)
 
-        wall1.save_to_group(wall1_group)
-        wall2.save_to_group(wall2_group)
-        WallBuilder.rebuild_wall_from_model(model, wall1_group, wall1)
-        WallBuilder.rebuild_wall_from_model(model, wall2_group, wall2)
+        other = WallBuilder.find_wall_group(model, joint['uid'].to_i)
+        other_end = joint['other_end'].to_s
+        linked = other && other != wall_group && ENDS.map(&:to_s).include?(other_end) &&
+                 mutual?(wall_group, end_key, other, other_end) &&
+                 join_ends(model, wall_group, end_key.to_sym, other, other_end.to_sym)
+        next if linked
 
-        return true
+        partner_points_back = other && mutual?(wall_group, end_key, other, other_end)
+        unlink(wall_group, end_key)
+        unlink(other, other_end) if partner_points_back
       end
-
-      false
-    end
-
-    def self.find_segment_intersection_2d(p1, p2, q1, q2)
-      x1, y1 = p1[0].to_f, p1[1].to_f
-      x2, y2 = p2[0].to_f, p2[1].to_f
-      x3, y3 = q1[0].to_f, q1[1].to_f
-      x4, y4 = q2[0].to_f, q2[1].to_f
-
-      den = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4))
-      return nil if den.abs < 1e-6
-
-      px_num = ((x1 * y2) - (y1 * x2)) * (x3 - x4) - ((x1 - x2) * ((x3 * y4) - (y3 * x4)))
-      py_num = ((x1 * y2) - (y1 * x2)) * (y3 - y4) - ((y1 - y2) * ((x3 * y4) - (y3 * x4)))
-
-      px = px_num / den
-      py = py_num / den
-      [px, py, 0.0]
-    end
-
-    def self.point_on_segment?(point, p1, p2, tolerance = 0.5)
-      min_x = [p1[0], p2[0]].min - tolerance
-      max_x = [p1[0], p2[0]].max + tolerance
-      min_y = [p1[1], p2[1]].min - tolerance
-      max_y = [p1[1], p2[1]].max + tolerance
-
-      return false unless point[0].to_f >= min_x && point[0].to_f <= max_x
-      return false unless point[1].to_f >= min_y && point[1].to_f <= max_y
-
       true
     end
 
-    def self.almost_parallel?(a1, a2, b1, b2, tolerance = 0.01)
-      ax = a2[0] - a1[0]
-      ay = a2[1] - a1[1]
-      bx = b2[0] - b1[0]
-      by = b2[1] - b1[1]
+    def self.best_candidate(group1, group2)
+      return nil unless group1 && group2 && group1 != group2 && group1.valid? && group2.valid?
 
-      cross = (ax * by) - (ay * bx)
-      cross.abs <= tolerance
+      wall1 = WallModel.from_group(group1)
+      wall2 = WallModel.from_group(group2)
+      return nil unless usable?(wall1) && usable?(wall2)
+
+      candidates = ENDS.product(ENDS).map { |end1, end2| candidate_for(wall1, end1, wall2, end2) }.compact
+      candidates.min_by { |candidate| candidate[:gap] }
     end
 
-    def self.lines_overlap_2d?(a1, a2, b1, b2)
-      intersection = find_segment_intersection_2d(a1, a2, b1, b2)
-      return false unless intersection
-
-      point_on_segment?(intersection, a1, a2) && point_on_segment?(intersection, b1, b2)
+    def self.usable?(wall)
+      !wall.nil? && !wall.path_points.nil? && wall.path_points.length >= 2 && !wall.path_closed?
     end
 
-    def self.shared_endpoint(a1, a2, b1, b2, tolerance = 1.0)
-      [[a1, b1], [a1, b2], [a2, b1], [a2, b2]].each do |first, second|
-        next if distance_2d(first, second) > tolerance
+    # Works out where two ends meet. Returns nil if they cannot be joined.
+    def self.candidate_for(wall1, end1, wall2, end2)
+      p1 = end_point(wall1, end1)
+      p2 = end_point(wall2, end2)
+      d1 = outward_direction(wall1, end1)
+      d2 = outward_direction(wall2, end2)
+      return nil unless p1 && p2 && d1 && d2
 
-        return [
-          (first[0].to_f + second[0].to_f) / 2.0,
-          (first[1].to_f + second[1].to_f) / 2.0,
-          (first[2].to_f + second[2].to_f) / 2.0
-        ]
+      determinant = (-d1[0] * d2[1]) + (d2[0] * d1[1])
+      if determinant.abs < PARALLEL_DETERMINANT
+        # Parallel: only end-to-end continuation on one line is supported.
+        return nil unless (d1[0] * d2[0]) + (d1[1] * d2[1]) < -0.999
+        return nil if distance_to_line(p2, p1, d1) > COLLINEAR_TOLERANCE_MM
+
+        point = [(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0, p1[2]]
+        type = JoinType::CONTINUATION
+      else
+        # Solve p1 + t*d1 = p2 + s*d2 for t (Cramer's rule).
+        rx = p2[0] - p1[0]
+        ry = p2[1] - p1[1]
+        t = ((-rx * d2[1]) + (d2[0] * ry)) / determinant
+        point = [p1[0] + (t * d1[0]), p1[1] + (t * d1[1]), p1[2]]
+        type = JoinType::MITER
       end
-      nil
+
+      return nil unless valid_end?(wall1, end1, point) && valid_end?(wall2, end2, point)
+
+      { end1: end1, end2: end2, point: point, type: type, gap: JointGeometry.distance(p1, p2) }
     end
 
-    def self.nearest_endpoint_for_point(wall_model, point)
-      d_start = distance_2d(wall_model.start_point, point)
-      d_end = distance_2d(wall_model.end_point, point)
-      d_start <= d_end ? :start : :end
+    # The joint point must be reachable and must leave the wall at least
+    # MIN_SEGMENT_MM long along its end segment.
+    def self.valid_end?(wall, which, point)
+      return false if JointGeometry.distance(point, end_point(wall, which)) > MAX_JOINT_DISTANCE_MM
+
+      direction = outward_direction(wall, which)
+      interior = which == :start ? wall.path_points[1] : wall.path_points[-2]
+      along = ((point[0] - interior[0]) * direction[0]) + ((point[1] - interior[1]) * direction[1])
+      along > MIN_SEGMENT_MM
     end
 
-    def self.endpoint_near?(point, start_point, end_point, tolerance = 1.0)
-      distance_2d(point, start_point) <= tolerance || distance_2d(point, end_point) <= tolerance
+    def self.join_ends(model, group1, end1, group2, end2)
+      wall1 = WallModel.from_group(group1)
+      wall2 = WallModel.from_group(group2)
+      return false unless usable?(wall1) && usable?(wall2)
+
+      candidate = candidate_for(wall1, end1, wall2, end2)
+      return false unless candidate
+
+      point = candidate[:point]
+      set_end(wall1, end1, point)
+      set_end(wall2, end2, point)
+      link(wall1, end1, group2, end2)
+      link(wall2, end2, group1, end1)
+      wall1.save_to_group(group1)
+      wall2.save_to_group(group2)
+      # Save both first, so each rebuild can read the neighbour's new end.
+      WallBuilder.rebuild_wall_from_model(model, group1, wall1)
+      WallBuilder.rebuild_wall_from_model(model, group2, wall2)
+      true
     end
 
-    def self.distance_2d(p1, p2)
-      dx = p1[0].to_f - p2[0].to_f
-      dy = p1[1].to_f - p2[1].to_f
-      Math.sqrt((dx * dx) + (dy * dy))
+    # A link is trusted only when the other wall points back at this end.
+    def self.mutual?(group1, end1, group2, end2)
+      other = WallModel.from_group(group2)
+      joint = other && other.params['joints'].is_a?(Hash) ? other.params['joints'][end2.to_s] : nil
+      joint.is_a?(Hash) && joint['uid'].to_i == group1.persistent_id && joint['other_end'].to_s == end1.to_s
+    end
+
+    def self.link(wall, end_key, other_group, other_end)
+      joints = wall.params['joints'].is_a?(Hash) ? wall.params['joints'] : {}
+      joints[end_key.to_s] = { 'uid' => other_group.persistent_id, 'other_end' => other_end.to_s }
+      wall.params['joints'] = joints
+    end
+
+    def self.unlink(group, end_key)
+      return unless group && group.valid?
+
+      wall = WallModel.from_group(group)
+      return unless wall && wall.params['joints'].is_a?(Hash) && wall.params['joints'].key?(end_key.to_s)
+
+      wall.params['joints'].delete(end_key.to_s)
+      wall.params.delete('joints') if wall.params['joints'].empty?
+      wall.save_to_group(group)
+    end
+
+    def self.set_end(wall, which, point)
+      which == :start ? wall.set_start_point(point) : wall.set_end_point(point)
+    end
+
+    def self.end_point(wall, which)
+      which == :start ? wall.path_points.first : wall.path_points.last
+    end
+
+    # Points away from the wall body, through the given end.
+    def self.outward_direction(wall, which)
+      path = wall.path_points
+      which == :start ? JointGeometry.unit(path[1], path[0]) : JointGeometry.unit(path[-2], path[-1])
+    end
+
+    def self.distance_to_line(point, origin, direction)
+      ((point[0] - origin[0]) * direction[1] - (point[1] - origin[1]) * direction[0]).abs
     end
   end
 end
