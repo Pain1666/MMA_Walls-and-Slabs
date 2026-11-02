@@ -7,6 +7,8 @@ require 'json'
 require_relative 'constants'
 
 module MMA_WallsAndSlabs
+  PLUGIN_DATA_VERSION = '1.1.0'
+
   class WallModel
     DEFAULT_WALL_PARAMS = {
       'height' => Defaults::WALL_HEIGHT,
@@ -124,6 +126,16 @@ module MMA_WallsAndSlabs
       @params['end_point'] = clean_points.last
     end
 
+    # Moves one end of the centre line. For path walls the first/last path
+    # point is moved too, so the stored path and the endpoints never disagree.
+    def set_start_point(point)
+      assign_endpoint(:start, point)
+    end
+
+    def set_end_point(point)
+      assign_endpoint(:end, point)
+    end
+
     def set_layer_extension(kind, index, value)
       key = kind == :layer_start ? 'layer_start_extensions' : 'layer_end_extensions'
       extensions = Array(@params[key]).dup
@@ -159,14 +171,6 @@ module MMA_WallsAndSlabs
       self
     end
 
-    def set_start_point(point)
-      @params['start_point'] = Array(point).map(&:to_f)
-    end
-
-    def set_end_point(point)
-      @params['end_point'] = Array(point).map(&:to_f)
-    end
-
     def set_height(value)
       @params['height'] = value.to_f
     end
@@ -194,6 +198,9 @@ module MMA_WallsAndSlabs
         set_path_points(points.reverse)
         @params['layer_start_extensions'], @params['layer_end_extensions'] =
           @params['layer_end_extensions'], @params['layer_start_extensions']
+        # Joint links refer to the old start/end; drop them. Neighbours whose
+        # link points back here are ignored (see WallJoiner.mutual?).
+        @params.delete('joints')
         path_length = points.each_cons(2).sum do |start_point, end_point|
           dx = end_point[0] - start_point[0]
           dy = end_point[1] - start_point[1]
@@ -213,12 +220,42 @@ module MMA_WallsAndSlabs
       @params['start_point'], @params['end_point'] = end_point, start_point
     end
 
+    # Stores the parameters in the group's LOCAL frame (path points are mapped
+    # through the inverse of the group transform), so from_group can always
+    # apply the transform once without double-counting it.
     def save_to_group(group)
       return false unless group && group.valid?
 
+      stored = Marshal.load(Marshal.dump(@params))
+      transformation = group.transformation
+      unless transformation.identity?
+        inverse = transformation.inverse
+        %w[start_point end_point].each do |key|
+          stored[key] = self.class.transform_point(stored[key], inverse) if stored[key].is_a?(Array)
+        end
+        if stored['path_points'].is_a?(Array)
+          stored['path_points'] = stored['path_points'].map { |point| self.class.transform_point(point, inverse) }
+        end
+      end
+
+      group.set_attribute(DICT_NAME, ATTR_VERSION, PLUGIN_DATA_VERSION)
       group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
-      group.set_attribute(DICT_NAME, ATTR_DATA, JSON.generate(@params))
+      group.set_attribute(DICT_NAME, ATTR_DATA, JSON.generate(stored))
       true
+    end
+
+    private
+
+    def assign_endpoint(which, point)
+      current = which == :start ? start_point : end_point
+      value = [point[0].to_f, point[1].to_f, (point[2] || current[2]).to_f]
+      points = path_points
+      if points && !points.empty?
+        points[which == :start ? 0 : -1] = value
+        set_path_points(points)
+      else
+        @params[which == :start ? 'start_point' : 'end_point'] = value
+      end
     end
   end
 end
