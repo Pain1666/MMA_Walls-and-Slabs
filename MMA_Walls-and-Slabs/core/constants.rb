@@ -8,60 +8,73 @@ module MMA_WallsAndSlabs
   ATTR_TYPE    = 'object_type'
   ATTR_DATA    = 'parameters_json'
   ATTR_VERSION = 'plugin_version'
+  PLUGIN_DATA_VERSION = '1.1.0'
 
   module CoreType
-    CONCRETE   = 'concrete'
-    POROTON    = 'poroton'
-    BRICK      = 'brick'
-    AAC_BLOCK  = 'aac_block'
-    DRYWALL    = 'drywall'
+    CONCRETE        = 'concrete'
+    HOLLOW_BRICK    = 'hollow_brick'
+    BRICK           = 'brick'
+    CONCRETE_BLOCK  = 'concrete_block'
+    DRYWALL         = 'drywall'
 
-    ALL = [CONCRETE, POROTON, BRICK, AAC_BLOCK, DRYWALL].freeze
+    ALL = [CONCRETE, HOLLOW_BRICK, BRICK, CONCRETE_BLOCK, DRYWALL].freeze
 
     LABELS = {
-      CONCRETE  => 'Concrete (Calcestruzzo armato)',
-      POROTON   => 'Hollow Clay Block (Laterizio / Poroton)',
-      BRICK     => 'Solid Brick (Mattone pieno)',
-      AAC_BLOCK => 'Aerated Concrete (Ytong / Blocco cls)',
-      DRYWALL   => 'Drywall Partition (Cartongesso)'
+      CONCRETE       => 'Reinforced Concrete Wall',
+      HOLLOW_BRICK   => 'Hollow Clay Block',
+      BRICK          => 'Solid Brick',
+      CONCRETE_BLOCK => 'Hollow Concrete Block',
+      DRYWALL        => 'Drywall Partition'
     }.freeze
   end
 
+  # Material names, colours and textures follow the "Sketchup Extension Materials" sheet.
   module DefaultMaterials
     PALETTE = {
-      'EWS_Concrete'       => [190, 192, 195],
-      'EWS_Laterizio'      => [208, 92, 48],
-      'EWS_Brick'          => [168, 52, 38],
-      'EWS_Ytong'          => [230, 230, 225],
-      'EWS_Metal_Stud'     => [118, 134, 150],
-      'EWS_Drywall_Board'  => [232, 228, 218],
-      'EWS_Insulation_EPS' => [246, 238, 115],
-      'EWS_Render_Ext'     => [240, 236, 226],
-      'EWS_Plaster_Int'    => [250, 250, 248],
-      'EWS_Screed'         => [155, 155, 155],
-      'EWS_Wood_Flooring'  => [192, 145, 88],
-      'EWS_Ceramic_Tile'   => [145, 135, 125]
+      'MMA_Concrete'       => [190, 192, 195],
+      'MMA_Brick'          => [168, 52, 38],
+      'MMA_Concrete_Block' => [230, 230, 225],
+      'MMA_Metal_Stud'     => [118, 134, 150],
+      'MMA_Drywall_Board'  => [232, 228, 218],
+      'MMA_Insulation_EPS' => [246, 238, 115],
+      'MMA_Render_Ext'     => [240, 236, 226],
+      'MMA_Plaster_Int'    => [250, 250, 248],
+      'MMA_Screed'         => [155, 155, 155],
+      'MMA_Wood_Flooring'  => [192, 145, 88],
+      'MMA_Ceramic_Tile'   => [145, 135, 125],
+      'MMA_Stone_Dark'     => [45, 45, 45],
+      'MMA_Stone_Light'    => [170, 170, 170],
+      'MMA_Stone_Flooring' => [170, 170, 170]
     }.freeze
 
     TEXTURE_FILES = {
-      'EWS_Concrete'       => 'CONCRETE.jpg',
-      'EWS_Laterizio'      => 'BRICK_RED.jpg',
-      'EWS_Brick'          => 'BRICK_RED.jpg',
-      'EWS_Render_Ext'     => 'STUCCO_LIGHT_TAN.jpg',
-      'EWS_Drywall_Board'  => 'GYPSUMW_HORZ.jpg',
-      'EWS_Plaster_Int'    => 'STUCCO_LIGHT_TAN.jpg',
-      'EWS_Insulation_EPS' => 'XPS_FOAM_R100_NOBORDER.jpg',
-      'EWS_Screed'         => 'CONCRETE.jpg',
-      'EWS_Wood_Flooring'  => 'CONCRETE.jpg',
-      'EWS_Ceramic_Tile'   => 'CONCRETE.jpg'
+      'MMA_Concrete'       => 'Concrete_01.png',
+      'MMA_Brick'          => 'Brick_01.png',
+      'MMA_Concrete_Block' => 'Concrete_Block_01.jpg',
+      'MMA_Metal_Stud'     => 'Metal_01.png',
+      'MMA_Drywall_Board'  => 'Plaster_Int_01.jpg',
+      'MMA_Insulation_EPS' => 'Wool-insulation_01.jpg',
+      'MMA_Render_Ext'     => 'Plaster_Ext_01.jpg',
+      'MMA_Plaster_Int'    => 'Plaster_Int_01.jpg',
+      'MMA_Screed'         => 'Concrete_02.jpg',
+      'MMA_Wood_Flooring'  => 'Wood_01.png',
+      'MMA_Ceramic_Tile'   => 'Ceramic_Tiles_01.png',
+      'MMA_Stone_Dark'     => 'Stone_01.jpg',
+      'MMA_Stone_Light'    => 'Stone_02.jpg',
+      'MMA_Stone_Flooring' => 'Stone_03.jpg'
     }.freeze
 
+    # Real-world size covered by one texture, in mm (width x height).
+    # Files without an entry use SketchUp's default texture scale.
     TEXTURE_SIZES = {
-      'CONCRETE.jpg' => [600.0, 600.0],
-      'BRICK_RED.jpg' => [600.0, 600.0],
-      'STUCCO_LIGHT_TAN.jpg' => [600.0, 600.0],
-      'GYPSUMW_HORZ.jpg' => [600.0, 600.0],
-      'XPS_FOAM_R100_NOBORDER.jpg' => [600.0, 600.0]
+      'Concrete_01.png'        => [1000.0, 1000.0],
+      'Brick_01.png'           => [900.0, 900.0],
+      'Concrete_Block_01.jpg'  => [1560.0, 980.0],
+      'Plaster_Ext_01.jpg'     => [980.0, 1024.0],
+      'Plaster_Int_01.jpg'     => [980.0, 1024.0],
+      'Wool-insulation_01.jpg' => [900.0, 805.0],
+      'Concrete_02.jpg'        => [600.0, 600.0],
+      'Stone_01.jpg'           => [1200.0, 2400.0]
     }.freeze
   end
 
@@ -70,9 +83,9 @@ module MMA_WallsAndSlabs
     WALL_JUSTIFICATION = 'center'
     CORE_THICKNESS = {
       CoreType::CONCRETE => 250.0,
-      CoreType::POROTON => 250.0,
+      CoreType::HOLLOW_BRICK => 250.0,
       CoreType::BRICK => 250.0,
-      CoreType::AAC_BLOCK => 200.0,
+      CoreType::CONCRETE_BLOCK => 200.0,
       CoreType::DRYWALL => 75.0
     }.freeze
 
@@ -104,28 +117,28 @@ module MMA_WallsAndSlabs
       case preset.to_s
       when WallPresets::GENERIC
         [
-          { 'name' => 'Exterior render', 'thickness' => 15.0, 'material' => 'EWS_Render_Ext', 'enabled' => true },
-          { 'name' => 'Insulation', 'thickness' => 100.0, 'material' => 'EWS_Insulation_EPS', 'enabled' => true },
-          { 'name' => 'Block core', 'thickness' => 250.0, 'material' => 'EWS_Laterizio', 'enabled' => true },
-          { 'name' => 'Interior plaster', 'thickness' => 15.0, 'material' => 'EWS_Plaster_Int', 'enabled' => true }
+          { 'name' => 'Exterior render', 'thickness' => 15.0, 'material' => 'MMA_Render_Ext', 'enabled' => true },
+          { 'name' => 'Insulation', 'thickness' => 100.0, 'material' => 'MMA_Insulation_EPS', 'enabled' => true },
+          { 'name' => 'Block core', 'thickness' => 250.0, 'material' => 'MMA_Brick', 'enabled' => true },
+          { 'name' => 'Interior plaster', 'thickness' => 15.0, 'material' => 'MMA_Plaster_Int', 'enabled' => true }
         ]
       when WallPresets::THICK_WALL
         [
-          { 'name' => 'Exterior render', 'thickness' => 15.0, 'material' => 'EWS_Render_Ext', 'enabled' => true },
-          { 'name' => 'Insulation', 'thickness' => 80.0, 'material' => 'EWS_Insulation_EPS', 'enabled' => true },
-          { 'name' => 'Structural wall', 'thickness' => 300.0, 'material' => 'EWS_Concrete', 'enabled' => true },
-          { 'name' => 'Interior plaster', 'thickness' => 15.0, 'material' => 'EWS_Plaster_Int', 'enabled' => true }
+          { 'name' => 'Exterior render', 'thickness' => 15.0, 'material' => 'MMA_Render_Ext', 'enabled' => true },
+          { 'name' => 'Insulation', 'thickness' => 80.0, 'material' => 'MMA_Insulation_EPS', 'enabled' => true },
+          { 'name' => 'Structural wall', 'thickness' => 300.0, 'material' => 'MMA_Concrete', 'enabled' => true },
+          { 'name' => 'Interior plaster', 'thickness' => 15.0, 'material' => 'MMA_Plaster_Int', 'enabled' => true }
         ]
       when WallPresets::PARTITION
         [
-          { 'name' => 'Gypsum board', 'thickness' => 12.5, 'material' => 'EWS_Drywall_Board', 'enabled' => true },
-          { 'name' => 'Studs', 'thickness' => 90.0, 'material' => 'EWS_Metal_Stud', 'enabled' => true },
-          { 'name' => 'Gypsum board', 'thickness' => 12.5, 'material' => 'EWS_Drywall_Board', 'enabled' => true }
+          { 'name' => 'Gypsum board', 'thickness' => 12.5, 'material' => 'MMA_Drywall_Board', 'enabled' => true },
+          { 'name' => 'Studs', 'thickness' => 90.0, 'material' => 'MMA_Metal_Stud', 'enabled' => true },
+          { 'name' => 'Gypsum board', 'thickness' => 12.5, 'material' => 'MMA_Drywall_Board', 'enabled' => true }
         ]
       else
         [
-          { 'name' => 'Layer 1', 'thickness' => 50.0, 'material' => 'EWS_Concrete', 'enabled' => true },
-          { 'name' => 'Layer 2', 'thickness' => 50.0, 'material' => 'EWS_Render_Ext', 'enabled' => true }
+          { 'name' => 'Layer 1', 'thickness' => 50.0, 'material' => 'MMA_Concrete', 'enabled' => true },
+          { 'name' => 'Layer 2', 'thickness' => 50.0, 'material' => 'MMA_Render_Ext', 'enabled' => true }
         ]
       end
     end
