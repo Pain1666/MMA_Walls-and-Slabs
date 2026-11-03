@@ -8,6 +8,7 @@ require_relative '../core/geometry_helper'
 require_relative '../core/wall_object'
 require_relative '../core/wall_builder'
 require_relative '../core/wall_joiner'
+require_relative '../core/segment_layers'
 
 module MMA_WallsAndSlabs
   class EditWallTool
@@ -120,6 +121,23 @@ module MMA_WallsAndSlabs
       view.invalidate
     end
 
+    def onLButtonDoubleClick(_flags, x, y, view)
+      safe do
+        @input.pick(view, x, y)
+        target = wall_group_at(view, x, y) || @group || pick_wall_group_from_selection
+        next unless target && target.valid? && WallModel.valid_wall_group?(target)
+
+        wall_model = WallModel.from_group(target)
+        next unless wall_model
+        next unless detect_handle_state(view, x, y, wall_model) == :none
+
+        @group = target
+        edit_segment_layers(target, wall_model)
+        status_hint
+        view.invalidate
+      end
+    end
+
     def onCancel(reason, view)
       @state = :idle
       @handle = :none
@@ -195,6 +213,60 @@ module MMA_WallsAndSlabs
 
     private
 
+    # Asks for thickness and material of each layer in the segment under the
+    # cursor, and stores them as that segment's overrides.
+    def edit_segment_layers(group, wall_model)
+      # WallModel.from_group returns world coordinates, so compare in world space.
+      point = @input.position
+      segment = if wall_model.arc?
+                  0
+                else
+                  SegmentLayers.nearest_segment(wall_model.path_points,
+                                                GeometryHelper.to_mm(point.x),
+                                                GeometryHelper.to_mm(point.y),
+                                                wall_model.path_closed?)
+                end
+      return unless segment
+
+      params = wall_model.params
+      full = WallBuilder.wall_layers(params)
+      active = WallBuilder.active_layer_indices(params)
+      stack = WallBuilder.stack_for(params, segment, active)
+      choices = (DefaultMaterials::PALETTE.keys + stack.map { |layer| layer['material'].to_s }).uniq.reject(&:empty?)
+
+      prompts = []
+      defaults = []
+      lists = []
+      stack.each_with_index do |layer, index|
+        prompts << "#{index + 1}. #{layer['name']} - thickness (mm)"
+        defaults << layer['thickness'].to_f.round(2).to_s
+        lists << ''
+        prompts << "#{index + 1}. #{layer['name']} - material"
+        defaults << layer['material'].to_s
+        lists << choices.join('|')
+      end
+      answers = UI.inputbox(prompts, defaults, lists, "Segment #{segment + 1} layers (mm)")
+      return unless answers
+
+      new_stack = stack.each_with_index.map do |layer, index|
+        thickness = Float(answers[index * 2].to_s.strip, exception: false)
+        if thickness.nil? || thickness.negative?
+          UI.messagebox("Layer #{index + 1}: thickness must be a number of zero or more.")
+          return
+        end
+        material = answers[(index * 2) + 1].to_s.strip
+        material = layer['material'] if material.empty?
+        { 'thickness' => thickness, 'material' => material }
+      end
+
+      SegmentLayers.store(params, segment, full, active, new_stack)
+      WallBuilder.rebuild_wall_from_model(Sketchup.active_model, group, WallModel.new(params))
+      WallJoiner.refresh_adjacent_joins(Sketchup.active_model, group)
+      Sketchup.status_text = "MMA Edit Wall Tool: segment #{segment + 1} layers updated."
+    rescue StandardError => error
+      UI.messagebox("Could not edit segment layers: #{error.message}")
+    end
+
     def pick_wall_group
       model = Sketchup.active_model
       return nil unless model
@@ -233,6 +305,17 @@ module MMA_WallsAndSlabs
     end
 
     def wall_handles(wall_model)
+      if wall_model.arc?
+        # Curved walls can be moved and resized; their vertices are not editable yet.
+        centre = wall_model.midpoint
+        height_point = centre.dup
+        height_point[2] += 300.0
+        return [
+          { name: :wall, point: point_in_model_units(centre) },
+          { name: :height, point: point_in_model_units(height_point) }
+        ]
+      end
+
       points = wall_model.path_points
       if points && points.length >= 2
         handles = points.each_with_index.map do |point, index|
@@ -545,10 +628,10 @@ module MMA_WallsAndSlabs
             wall_model.path_closed?
           )
           patches = WallBuilder.wall_patches(length, height, openings)
-          low_start = WallBuilder.path_offset_point(points, directions, index, offset, wall_model.path_closed?, max_miter)
-          low_end = WallBuilder.path_offset_point(points, directions, next_index, offset, wall_model.path_closed?, max_miter)
-          high_start = WallBuilder.path_offset_point(points, directions, index, offset + thickness, wall_model.path_closed?, max_miter)
-          high_end = WallBuilder.path_offset_point(points, directions, next_index, offset + thickness, wall_model.path_closed?, max_miter)
+          low_start = WallBuilder.path_offset_point(points, directions, index, offset, offset, wall_model.path_closed?, max_miter)
+          low_end = WallBuilder.path_offset_point(points, directions, next_index, offset, offset, wall_model.path_closed?, max_miter)
+          high_start = WallBuilder.path_offset_point(points, directions, index, offset + thickness, offset + thickness, wall_model.path_closed?, max_miter)
+          high_end = WallBuilder.path_offset_point(points, directions, next_index, offset + thickness, offset + thickness, wall_model.path_closed?, max_miter)
           patches.each do |left, right, bottom_height, top_height|
             low_left = left <= 0.001 ? low_start : WallBuilder.path_station_point(start_point, direction, offset, left)
             low_right = right >= length - 0.001 ? low_end : WallBuilder.path_station_point(start_point, direction, offset, right)

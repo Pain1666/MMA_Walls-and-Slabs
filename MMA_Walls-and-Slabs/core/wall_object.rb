@@ -62,6 +62,12 @@ module MMA_WallsAndSlabs
         params['start_point'] = params['path_points'].first
         params['end_point'] = params['path_points'].last
       end
+      arc = params['arc']
+      if arc.is_a?(Hash) && arc['center'].is_a?(Array)
+        centre = transform_point([arc['center'][0], arc['center'][1], arc['z'].to_f], transformation)
+        arc['center'] = [centre[0], centre[1]]
+        arc['z'] = centre[2]
+      end
       params
     end
 
@@ -177,10 +183,18 @@ module MMA_WallsAndSlabs
       @params['justification'] = value.to_s
     end
 
+    def arc?
+      @params['arc'].is_a?(Hash)
+    end
+
     def move(dx, dy, dz)
       points = path_points
       if points
         set_path_points(points.map { |point| [point[0] + dx, point[1] + dy, point[2] + dz] })
+        if arc?
+          @params['arc']['center'] = [@params['arc']['center'][0] + dx, @params['arc']['center'][1] + dy]
+          @params['arc']['z'] = @params['arc']['z'].to_f + dz
+        end
         return
       end
 
@@ -199,6 +213,8 @@ module MMA_WallsAndSlabs
         # Joint links refer to the old start/end; drop them. Neighbours whose
         # link points back here are ignored (see WallJoiner.mutual?).
         @params.delete('joints')
+        # A curved wall keeps its centre; reversing the path reverses the sweep.
+        @params['arc']['sweep'] = -@params['arc']['sweep'].to_f if arc?
         path_length = points.each_cons(2).sum do |start_point, end_point|
           dx = end_point[0] - start_point[0]
           dy = end_point[1] - start_point[1]

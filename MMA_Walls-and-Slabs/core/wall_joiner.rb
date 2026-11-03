@@ -83,7 +83,8 @@ module MMA_WallsAndSlabs
     end
 
     def self.usable?(wall)
-      !wall.nil? && !wall.path_points.nil? && wall.path_points.length >= 2 && !wall.path_closed?
+      !wall.nil? && !wall.path_points.nil? && wall.path_points.length >= 2 &&
+        !wall.path_closed? && !wall.arc?
     end
 
     # Works out where two ends meet. Returns nil if they cannot be joined.

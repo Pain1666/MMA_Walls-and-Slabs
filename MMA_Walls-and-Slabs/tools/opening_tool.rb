@@ -132,6 +132,8 @@ module MMA_WallsAndSlabs
       wall = WallModel.from_group(group)
       raise ArgumentError, 'Could not read the selected wall.' unless wall
 
+      raise ArgumentError, 'Openings on curved walls are not supported yet.' if wall.arc?
+
       path_points = wall.path_points || [wall.start_point, wall.end_point]
       closed = wall.path_closed?
       segment_count = closed ? path_points.length : path_points.length - 1

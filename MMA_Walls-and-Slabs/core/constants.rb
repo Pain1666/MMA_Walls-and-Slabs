@@ -8,7 +8,7 @@ module MMA_WallsAndSlabs
   ATTR_TYPE    = 'object_type'
   ATTR_DATA    = 'parameters_json'
   ATTR_VERSION = 'plugin_version'
-  PLUGIN_DATA_VERSION = '1.1.0'
+  PLUGIN_DATA_VERSION = '2.0.0'
 
   module CoreType
     CONCRETE   = 'concrete'

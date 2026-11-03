@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 # ==============================================================================
-# MMA_Walls-and-Slabs - Edit Wall Tool
+# MMA_Walls-and-Slabs - Dialog Manager
 # ==============================================================================
 
 require_relative '../core/constants'
@@ -211,7 +211,7 @@ module MMA_WallsAndSlabs
           validate_wall_settings(data)
           if target_group && target_group.valid?
             existing = wall_params_for_group(target_group)
-            %w[start_point end_point path_points path_closed layer_start_extensions layer_end_extensions].each do |key|
+            %w[start_point end_point path_points path_closed layer_start_extensions layer_end_extensions segment_layers arc].each do |key|
               data[key] = existing[key] if existing.key?(key)
             end
             WallBuilder.build(Sketchup.active_model, data, target_group)
