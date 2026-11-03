@@ -7,6 +7,8 @@ require 'json'
 require_relative 'constants'
 require_relative 'geometry_helper'
 require_relative 'joint_geometry'
+require_relative 'segment_layers'
+require_relative 'arc_geometry'
 require_relative 'wall_object'
 
 module MMA_WallsAndSlabs
@@ -22,24 +24,16 @@ module MMA_WallsAndSlabs
       group.set_attribute(DICT_NAME, ATTR_DATA, payload)
     end
 
+    # Builds a wall from params. Curved walls (params['arc']) and straight or
+    # polyline walls are handled separately. Legacy straight walls without a
+    # stored path are converted to a two-point path.
     def self.build(model, params, target_group = nil)
       return nil unless model && params
-      if params['path_points']
-        return build_path(model, params, params['path_points'], target_group)
-      end
+      return build_arc(model, params, target_group) if params['arc'].is_a?(Hash)
 
-      model.start_operation('Build MMA Wall', true)
-      operation_started = true
-      wall_group = target_group || model.active_entities.add_group
-      wall_group.transformation = Geom::Transformation.new if target_group
-      build_segment(model, params, wall_group, !target_group.nil?)
-
-      model.commit_operation
-      operation_started = false
-      wall_group
-    rescue StandardError
-      model.abort_operation if operation_started
-      raise
+      points = params['path_points'] || [params['start_point'] || [0, 0, 0],
+                                         params['end_point'] || [1000, 0, 0]]
+      build_path(model, params, points, target_group)
     end
 
     def self.build_path(model, params, points, target_group = nil)
@@ -59,10 +53,8 @@ module MMA_WallsAndSlabs
       raise ArgumentError, 'A closed wall path must contain at least three points.' if closed && path_points.length < 3
       raise ArgumentError, 'A wall path must contain at least two points.' if path_points.length < 2
 
-      total_thickness = wall_layers(params)
-                        .select { |layer| layer['enabled'] != false && layer['thickness'].to_f > 0.001 }
-                        .sum { |layer| layer['thickness'].to_f }
-      raise ArgumentError, 'The wall must have at least one layer with positive thickness.' if total_thickness <= 0.001
+      active = active_layer_indices(params)
+      raise ArgumentError, 'The wall must have at least one layer with positive thickness.' if active.empty?
 
       segment_count = closed ? path_points.length : path_points.length - 1
       directions = segment_count.times.map do |index|
@@ -76,10 +68,11 @@ module MMA_WallsAndSlabs
         [dx / length, dy / length]
       end
 
-      wall_layer_specs = wall_layers(params).each_with_index.select do |layer, _index|
-        layer['enabled'] != false && layer['thickness'].to_f > 0.001
-      end
-      wall_layers = wall_layer_specs.map(&:first)
+      # Each segment has its own layer stack (base layers plus its overrides)
+      # and therefore its own boundary offsets from the centre line.
+      stacks = Array.new(segment_count) { |segment| stack_for(params, segment, active) }
+      bounds = stacks.map { |stack| SegmentLayers.boundaries(stack_thicknesses(stack), params['justification']) }
+      max_total = bounds.map { |offsets| offsets.last - offsets.first }.max.to_f
 
       # Joints are only meaningful for open walls. Keep the stored links unless
       # the caller supplies new ones.
@@ -90,6 +83,7 @@ module MMA_WallsAndSlabs
         'path_points' => path_points,
         'path_closed' => closed
       )
+      path_params.delete('arc')
       if joints.empty?
         path_params.delete('joints')
       else
@@ -107,11 +101,9 @@ module MMA_WallsAndSlabs
 
       corner_table = joint_corners(model, path_group, path_params, path_points, closed)
 
-      total_thickness = wall_layers.sum { |layer| layer['thickness'].to_f }
-      path_length = segment_count.times.sum do |index|
-        point_distance_2d(path_points[index], path_points[(index + 1) % path_points.length])
-      end
-      layer_groups = wall_layers.map do |layer|
+      full = wall_layers(params)
+      layer_groups = active.map do |full_index|
+        layer = full[full_index]
         thickness = layer['thickness'].to_f
         group = path_group.entities.add_group
         group.name = "Layer: #{layer['name']} (#{thickness.round}mm)"
@@ -120,6 +112,9 @@ module MMA_WallsAndSlabs
         group
       end
 
+      path_length = segment_count.times.sum do |index|
+        point_distance_2d(path_points[index], path_points[(index + 1) % path_points.length])
+      end
       cumulative_distance = 0.0
       segment_count.times do |index|
         start_point = path_points[index]
@@ -127,14 +122,86 @@ module MMA_WallsAndSlabs
         length = point_distance_2d(start_point, end_point)
         local_openings = path_openings_for_segment(params, cumulative_distance, length, path_length, closed)
         segment_params = params.merge('openings' => local_openings)
-        build_path_segment(segment_params, path_points, directions, index, layer_groups, wall_layer_specs,
-                           closed, total_thickness, corner_table)
+        build_path_segment(model, segment_params, path_points, directions, index, layer_groups,
+                           stacks, bounds, active, closed, corner_table, max_total)
         cumulative_distance += length
       end
 
       model.commit_operation
       operation_started = false
       path_group
+    rescue StandardError
+      model.abort_operation if operation_started
+      raise
+    end
+
+    # Builds a curved wall from params['arc'] = { center:, radius:, sweep:, z: }
+    # (local coordinates, mm). The start point is params['path_points'].first.
+    # Curved walls are not joined and do not take openings yet.
+    def self.build_arc(model, params, target_group = nil)
+      arc = params['arc']
+      center = Array(arc['center']).map(&:to_f)
+      radius = arc['radius'].to_f
+      sweep = arc['sweep'].to_f
+      z = arc['z'].to_f
+      raise ArgumentError, 'Curved wall radius must be greater than zero.' unless radius.positive?
+      raise ArgumentError, 'Curved wall sweep must not be zero.' if sweep.abs < 1e-6
+
+      height_mm = (params['height'] || Defaults::WALL_HEIGHT).to_f
+      raise ArgumentError, 'Wall height must be greater than zero.' unless height_mm.positive?
+
+      active = active_layer_indices(params)
+      raise ArgumentError, 'The wall must have at least one layer with positive thickness.' if active.empty?
+
+      stack = stack_for(params, 0, active)
+      bounds = SegmentLayers.boundaries(stack_thicknesses(stack), params['justification'])
+      radii = bounds.map { |offset| ArcGeometry.offset_radius(radius, sweep, offset) }
+      raise ArgumentError, 'The curved wall layers would reach the centre. Use a larger radius.' if radii.any? { |r| r <= 0.001 }
+
+      first = params['path_points'] ? params['path_points'].first : params['start_point']
+      start = ArcGeometry.angle(center, first)
+      centre_line = ArcGeometry.sample(center, radius, start, sweep)
+      path_points = centre_line.map { |x, y| [x, y, z] }
+      stored = params.merge('path_points' => path_points, 'path_closed' => false,
+                            'start_point' => path_points.first, 'end_point' => path_points.last,
+                            'openings' => [])
+      stored.delete('joints')
+
+      model.start_operation('Build MMA Curved Wall', true)
+      operation_started = true
+      group = target_group || model.active_entities.add_group
+      group.transformation = Geom::Transformation.new if target_group
+      group.entities.clear! if target_group
+      group.name = 'MMA Curved Wall'
+      group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
+      serialize_group_data(group, stored)
+
+      height = GeometryHelper.mm(height_mm)
+      stack.each_with_index do |layer, index|
+        thickness = layer['thickness'].to_f
+        next if thickness <= 0.001
+
+        layer_group = group.entities.add_group
+        layer_group.name = "Layer: #{layer['name']} (#{thickness.round}mm)"
+        material = GeometryHelper.get_or_create_material(model, layer['material'])
+        layer_group.material = material if material
+
+        outer = ArcGeometry.sample(center, radii[index], start, sweep)
+        inner = ArcGeometry.sample(center, radii[index + 1], start, sweep).reverse
+        ring = (outer + inner).map do |x, y|
+          Geom::Point3d.new(GeometryHelper.mm(x), GeometryHelper.mm(y), GeometryHelper.mm(z))
+        end
+        face = layer_group.entities.add_face(ring)
+        raise ArgumentError, "Could not create the curved wall layer '#{layer['name']}'." unless face
+
+        face.material = material if material
+        face.back_material = material if material
+        face.pushpull(face.normal.z.positive? ? height : -height)
+      end
+
+      model.commit_operation
+      operation_started = false
+      group
     rescue StandardError
       model.abort_operation if operation_started
       raise
@@ -159,22 +226,27 @@ module MMA_WallsAndSlabs
       nil
     end
 
-    # Offsets of every layer boundary from the centre line, in the wall's own
-    # path frame (left of travel is positive). Length = enabled layers + 1.
-    def self.boundary_offsets(params)
-      layers = wall_layers(params).select { |layer| layer['enabled'] != false && layer['thickness'].to_f > 0.001 }
-      total = layers.sum { |layer| layer['thickness'].to_f }
-      offset = case params['justification'].to_s
-               when WallJustification::LEFT then 0.0
-               when WallJustification::RIGHT then -total
-               else -total / 2.0
-               end
-      offsets = [offset]
-      layers.each do |layer|
-        offset += layer['thickness'].to_f
-        offsets << offset
-      end
-      offsets
+    # Full-list indices of the layers that are enabled and have thickness.
+    def self.active_layer_indices(params)
+      layers = wall_layers(params)
+      layers.each_index.select { |index| layers[index]['enabled'] != false && layers[index]['thickness'].to_f > 0.001 }
+    end
+
+    # The active layers of one segment, with that segment's overrides applied.
+    def self.stack_for(params, segment, active)
+      full = wall_layers(params)
+      SegmentLayers.apply(full, params['segment_layers'], segment).values_at(*active)
+    end
+
+    def self.stack_thicknesses(stack)
+      stack.map { |layer| layer['thickness'].to_f }
+    end
+
+    # Boundary offsets of the wall end at the start or end of an open path.
+    def self.end_boundaries(params, at_start, segment_count)
+      active = active_layer_indices(params)
+      segment = at_start ? 0 : segment_count - 1
+      SegmentLayers.boundaries(stack_thicknesses(stack_for(params, segment, active)), params['justification'])
     end
 
     # Mitred corners at each end of an open wall that is joined to another wall.
@@ -184,10 +256,8 @@ module MMA_WallsAndSlabs
       joints = params['joints']
       return {} if closed || model.nil? || own_group.nil? || !joints.is_a?(Hash) || joints.empty?
 
-      own_offsets = boundary_offsets(params)
-      total = own_offsets.last - own_offsets.first
-      limit = JointGeometry::MITRE_LIMIT_FACTOR * [total, 1.0].max
       own_id = own_group.persistent_id
+      segment_count = path_points.length - 1
       table = {}
 
       %w[start end].each do |end_key|
@@ -198,7 +268,7 @@ module MMA_WallsAndSlabs
         next if neighbour.nil? || neighbour == own_group
 
         other = WallModel.from_group(neighbour)
-        next unless other && other.path_points && !other.path_closed?
+        next unless other && other.path_points && !other.path_closed? && !other.arc?
 
         other_end = joint['other_end'].to_s
         back = other.params['joints'].is_a?(Hash) ? other.params['joints'][other_end] : nil
@@ -213,10 +283,14 @@ module MMA_WallsAndSlabs
         other_dir = JointGeometry.path_direction(other_path, other_at_start)
         next unless own_dir && other_dir
 
+        own_offsets = end_boundaries(params, at_start, segment_count)
+        other_offsets = end_boundaries(other.params, other_at_start, other_path.length - 1)
+        total = own_offsets.last - own_offsets.first
+        limit = JointGeometry::MITRE_LIMIT_FACTOR * [total, 1.0].max
         joint_point = [(own_point[0] + other_point[0]) / 2.0, (own_point[1] + other_point[1]) / 2.0]
         table[end_key] = JointGeometry.boundary_corners(
           own_point, JointGeometry.left_normal(own_dir), own_offsets,
-          other_point, JointGeometry.left_normal(other_dir), boundary_offsets(other.params),
+          other_point, JointGeometry.left_normal(other_dir), other_offsets,
           joint_point, limit
         )
       end
@@ -248,39 +322,57 @@ module MMA_WallsAndSlabs
       end
     end
 
-    def self.build_path_segment(params, path_points, directions, index, layer_groups, layer_specs,
-                                closed, total_thickness, joint_table = {})
+    # Builds the layer faces of one segment. bounds[i] are the boundary offsets
+    # of segment i; a vertex is mitred between the offsets of the two segments
+    # that meet there, so segments with different thicknesses join cleanly.
+    def self.build_path_segment(model, params, path_points, directions, index, layer_groups,
+                                stacks, bounds, active, closed, joint_table, max_total)
       height_mm = (params['height'] || Defaults::WALL_HEIGHT).to_f
       raise ArgumentError, 'Wall height must be greater than zero.' unless height_mm.positive?
 
-      raise ArgumentError, 'The wall must have at least one layer with positive thickness.' if layer_specs.empty?
+      raise ArgumentError, 'The wall must have at least one layer with positive thickness.' if active.empty?
 
-      base_offset = case params['justification'].to_s
-                    when WallJustification::LEFT then 0.0
-                    when WallJustification::RIGHT then -total_thickness
-                    else -total_thickness / 2.0
-                    end
-      max_miter_distance = total_thickness * 4.0
-
+      max_miter_distance = [max_total, 1.0].max * 4.0
+      segment_count = directions.length
       segment_end_index = (index + 1) % path_points.length
       start_point = path_points[index]
       end_point = path_points[segment_end_index]
       direction = directions[index]
       length = Math.sqrt((end_point[0] - start_point[0])**2 + (end_point[1] - start_point[1])**2)
 
+      own = bounds[index]
+      # Offsets of the segments on either side of the two vertices. For an open
+      # wall's free end there is no neighbour, so the own segment is used.
+      prev_bounds = (index.zero? && !closed) ? own : bounds[(index - 1) % segment_count]
+      next_bounds = (index == segment_count - 1 && !closed) ? own : bounds[(index + 1) % segment_count]
+
       start_corners = index.zero? ? joint_table['start'] : nil
       end_corners = index == path_points.length - 2 ? joint_table['end'] : nil
 
-      offset = base_offset
-      layer_specs.each_with_index do |(layer, source_index), layer_index|
-        thickness = layer['thickness'].to_f
-        layer_group = layer_groups[layer_index]
-        material = layer_group.material
+      openings = Array(params['openings']).select do |opening|
+        opening.is_a?(Hash) && opening.key?('position') &&
+          opening['width'].to_f.positive? && opening['height'].to_f.positive?
+      end
+      patches = wall_patches(length, height_mm, openings)
 
-        low_start = path_offset_point(path_points, directions, index, offset, closed, max_miter_distance)
-        low_end = path_offset_point(path_points, directions, segment_end_index, offset, closed, max_miter_distance)
-        high_start = path_offset_point(path_points, directions, index, offset + thickness, closed, max_miter_distance)
-        high_end = path_offset_point(path_points, directions, segment_end_index, offset + thickness, closed, max_miter_distance)
+      active.each_with_index do |full_index, layer_index|
+        layer = stacks[index][layer_index]
+        thickness = layer['thickness'].to_f
+        next if thickness <= 0.001
+
+        layer_group = layer_groups[layer_index]
+        material = GeometryHelper.get_or_create_material(model, layer['material'])
+        offset = own[layer_index]
+        upper = own[layer_index + 1]
+
+        low_start = path_offset_point(path_points, directions, index,
+                                      prev_bounds[layer_index], own[layer_index], closed, max_miter_distance)
+        low_end = path_offset_point(path_points, directions, segment_end_index,
+                                    own[layer_index], next_bounds[layer_index], closed, max_miter_distance)
+        high_start = path_offset_point(path_points, directions, index,
+                                       prev_bounds[layer_index + 1], upper, closed, max_miter_distance)
+        high_end = path_offset_point(path_points, directions, segment_end_index,
+                                     upper, next_bounds[layer_index + 1], closed, max_miter_distance)
 
         # Joined ends use the mitred corners shared with the neighbouring wall.
         start_joined = joint_pair?(start_corners, layer_index)
@@ -295,8 +387,8 @@ module MMA_WallsAndSlabs
         end
 
         unless closed
-          start_extension = Array(params['layer_start_extensions'])[source_index].to_f
-          end_extension = Array(params['layer_end_extensions'])[source_index].to_f
+          start_extension = Array(params['layer_start_extensions'])[full_index].to_f
+          end_extension = Array(params['layer_end_extensions'])[full_index].to_f
           if index.zero? && !start_extension.zero? && !start_joined
             low_start = extend_path_endpoint(low_start, directions[index], start_extension, true)
             high_start = extend_path_endpoint(high_start, directions[index], start_extension, true)
@@ -306,16 +398,12 @@ module MMA_WallsAndSlabs
             high_end = extend_path_endpoint(high_end, directions[index], end_extension, false)
           end
         end
-        openings = Array(params['openings']).select do |opening|
-          opening.is_a?(Hash) && opening.key?('position') &&
-            opening['width'].to_f.positive? && opening['height'].to_f.positive?
-        end
-        patches = wall_patches(length, height_mm, openings)
+
         patches.each do |left, right, bottom, top|
           low_left = left <= 0.001 ? low_start : path_station_point(start_point, direction, offset, left)
           low_right = right >= length - 0.001 ? low_end : path_station_point(start_point, direction, offset, right)
-          high_right = right >= length - 0.001 ? high_end : path_station_point(start_point, direction, offset + thickness, right)
-          high_left = left <= 0.001 ? high_start : path_station_point(start_point, direction, offset + thickness, left)
+          high_right = right >= length - 0.001 ? high_end : path_station_point(start_point, direction, upper, right)
+          high_left = left <= 0.001 ? high_start : path_station_point(start_point, direction, upper, left)
           footprint = [low_left, low_right, high_right, high_left].map do |point|
             Geom::Point3d.new(
               GeometryHelper.mm(point[0]),
@@ -331,7 +419,6 @@ module MMA_WallsAndSlabs
           patch_height = GeometryHelper.mm(top - bottom)
           face.pushpull(face.normal.z.positive? ? patch_height : -patch_height)
         end
-        offset += thickness
       end
     end
 
@@ -364,10 +451,15 @@ module MMA_WallsAndSlabs
       ]
     end
 
-    def self.path_offset_point(path_points, directions, point_index, offset, closed, max_miter_distance)
+    # Corner of a path vertex for one boundary. offset_prev is the offset from
+    # the centre line in the segment before the vertex, offset_next the offset in
+    # the segment after it. They differ where adjacent segments have different
+    # layer thicknesses. Open-wall ends use their single segment.
+    def self.path_offset_point(path_points, directions, point_index, offset_prev, offset_next, closed, max_miter_distance)
       point = path_points[point_index]
       if !closed && (point_index.zero? || point_index == path_points.length - 1)
         segment_index = point_index.zero? ? 0 : directions.length - 1
+        offset = point_index.zero? ? offset_next : offset_prev
         dx, dy = directions[segment_index]
         return [point[0] - dy * offset, point[1] + dx * offset, point[2]]
       end
@@ -377,12 +469,12 @@ module MMA_WallsAndSlabs
       previous_normal = [-previous_direction[1], previous_direction[0]]
       next_normal = [-next_direction[1], next_direction[0]]
       previous_point = [
-        point[0] + previous_normal[0] * offset,
-        point[1] + previous_normal[1] * offset
+        point[0] + previous_normal[0] * offset_prev,
+        point[1] + previous_normal[1] * offset_prev
       ]
       next_point = [
-        point[0] + next_normal[0] * offset,
-        point[1] + next_normal[1] * offset
+        point[0] + next_normal[0] * offset_next,
+        point[1] + next_normal[1] * offset_next
       ]
       denominator = previous_direction[0] * next_direction[1] -
                     previous_direction[1] * next_direction[0]
@@ -391,8 +483,8 @@ module MMA_WallsAndSlabs
         raise ArgumentError, 'Adjacent wall segments cannot reverse direction at a joint.' if dot.negative?
 
         return [
-          point[0] + (previous_normal[0] + next_normal[0]) * offset / 2.0,
-          point[1] + (previous_normal[1] + next_normal[1]) * offset / 2.0,
+          point[0] + (previous_normal[0] * offset_prev + next_normal[0] * offset_next) / 2.0,
+          point[1] + (previous_normal[1] * offset_prev + next_normal[1] * offset_next) / 2.0,
           point[2]
         ]
       end
@@ -408,81 +500,6 @@ module MMA_WallsAndSlabs
       raise ArgumentError, 'Wall joint is too sharp to create a stable miter.' if miter_distance > max_miter_distance
 
       [intersection[0], intersection[1], point[2]]
-    end
-
-    def self.build_segment(model, params, wall_group, clear_group = false)
-      start_point = Array(params['start_point'] || [0, 0, 0])
-      end_point = Array(params['end_point'] || [1000, 0, 0])
-      raise ArgumentError, 'Wall endpoints must contain three coordinates.' unless start_point.length >= 3 && end_point.length >= 3
-
-      height_mm = (params['height'] || Defaults::WALL_HEIGHT).to_f
-      raise ArgumentError, 'Wall height must be greater than zero.' unless height_mm.positive?
-
-      x0, y0, z0 = start_point.first(3).map { |value| GeometryHelper.mm(Float(value)) }
-      x1, y1, z1 = end_point.first(3).map { |value| GeometryHelper.mm(Float(value)) }
-      dx = x1 - x0
-      dy = y1 - y0
-      length = Math.sqrt((dx * dx) + (dy * dy))
-      raise ArgumentError, 'Wall endpoints must be different in the XY plane.' if length <= 0.001
-
-      normal = Geom::Vector3d.new(-dy / length, dx / length, 0)
-      layers = wall_layers(params)
-      enabled_layers = layers.select { |layer| layer['enabled'] != false && layer['thickness'].to_f > 0.001 }
-      raise ArgumentError, 'The wall must have at least one layer with positive thickness.' if enabled_layers.empty?
-
-      total_thickness_mm = enabled_layers.sum { |layer| layer['thickness'].to_f }
-      offset_mm = case params['justification'].to_s
-                  when WallJustification::LEFT then 0.0
-                  when WallJustification::RIGHT then -total_thickness_mm
-                  else -total_thickness_mm / 2.0
-                  end
-
-      wall_group.entities.clear! if clear_group
-      wall_group.name = 'MMA Wall' unless wall_group.name.to_s.start_with?('Wall Segment ')
-      wall_group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
-      serialize_group_data(wall_group, params)
-
-      entities = wall_group.entities
-      openings = Array(params['openings']).select do |opening|
-        opening.is_a?(Hash) && opening.key?('position') &&
-          opening['width'].to_f.positive? && opening['height'].to_f.positive?
-      end
-      enabled_layers.each do |layer|
-        thickness_mm = layer['thickness'].to_f
-        thickness_in = GeometryHelper.mm(thickness_mm)
-        layer_group = entities.add_group
-        layer_group.name = "Layer: #{layer['name']} (#{thickness_mm.round}mm)"
-        material = GeometryHelper.get_or_create_material(model, layer['material'])
-        layer_group.material = material if material
-
-        base_offset = GeometryHelper.mm(offset_mm)
-        wall_patches(length, height_mm, openings).each do |patch|
-          patch_group = layer_group.entities.add_group
-          left, right, bottom, top = patch
-          corners = [
-            [x0 + (dx / length * left) + normal.x * base_offset,
-             y0 + (dy / length * left) + normal.y * base_offset,
-             z0 + GeometryHelper.mm(bottom)],
-            [x0 + (dx / length * right) + normal.x * base_offset,
-             y0 + (dy / length * right) + normal.y * base_offset,
-             z0 + GeometryHelper.mm(bottom)],
-            [x0 + (dx / length * right) + normal.x * base_offset,
-             y0 + (dy / length * right) + normal.y * base_offset,
-             z0 + GeometryHelper.mm(top)],
-            [x0 + (dx / length * left) + normal.x * base_offset,
-             y0 + (dy / length * left) + normal.y * base_offset,
-             z0 + GeometryHelper.mm(top)]
-          ]
-          face = patch_group.entities.add_face(corners.map { |coordinates| Geom::Point3d.new(*coordinates) })
-          raise ArgumentError, "Could not create the wall layer '#{layer['name']}'." unless face
-
-          face.material = material if material
-          face.back_material = material if material
-          face.pushpull(-thickness_in)
-        end
-        offset_mm += thickness_mm
-      end
-      wall_group
     end
 
     def self.rebuild_wall_from_model(model, group, wall_model = nil)

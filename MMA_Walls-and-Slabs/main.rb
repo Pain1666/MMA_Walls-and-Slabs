@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 # ==============================================================================
-# MMA_Walls-and-Slabs - Main Plugin Loader & Menu/Toolbar Setup update 2.0
+# MMA_Walls-and-Slabs - Main Plugin Loader & Menu/Toolbar Setup
 # ==============================================================================
 
 require 'sketchup.rb'
@@ -14,6 +14,7 @@ require_relative 'core/slab_builder'
 require_relative 'core/opening_cutter'
 require_relative 'ui/dialog_manager'
 require_relative 'tools/draw_wall_tool'
+require_relative 'tools/draw_arc_wall_tool'
 require_relative 'tools/draw_slab_tool'
 require_relative 'tools/opening_tool'
 require_relative 'tools/join_wall_tool'
@@ -30,6 +31,13 @@ module MMA_WallsAndSlabs
     cmd_draw_wall.status_bar_text = 'Choose wall settings, confirm, then click wall points.'
     cmd_draw_wall.small_icon = File.join(icon_dir, 'wall_16.png')
     cmd_draw_wall.large_icon = File.join(icon_dir, 'wall_24.png')
+
+    cmd_draw_arc_wall = UI::Command.new('Draw Curved Wall') do
+      model = Sketchup.active_model
+      model.select_tool(DrawArcWallTool.new) if model
+    end
+    cmd_draw_arc_wall.tooltip = 'Draw a curved wall through three points'
+    cmd_draw_arc_wall.status_bar_text = 'Click start, end, and a point on the arc.'
 
     cmd_draw_slab = UI::Command.new('Draw Slab') do
       model = Sketchup.active_model
@@ -87,6 +95,7 @@ module MMA_WallsAndSlabs
 
     toolbar = UI::Toolbar.new('MMA_WallsAndSlabs')
     toolbar.add_item(cmd_draw_wall)
+    toolbar.add_item(cmd_draw_arc_wall)
     toolbar.add_item(cmd_draw_slab)
     toolbar.add_item(cmd_opening)
     toolbar.add_item(cmd_join_walls)
@@ -98,7 +107,7 @@ module MMA_WallsAndSlabs
     toolbar.show
 
     menu = UI.menu('Extensions').add_submenu('MMA Walls and Slabs')
-    [cmd_draw_wall, cmd_draw_slab, cmd_opening, cmd_join_walls, cmd_edit_wall,
+    [cmd_draw_wall, cmd_draw_arc_wall, cmd_draw_slab, cmd_opening, cmd_join_walls, cmd_edit_wall,
      cmd_wall_dialog, cmd_slab_dialog, cmd_opening_dialog].each do |command|
       menu.add_item(command)
     end

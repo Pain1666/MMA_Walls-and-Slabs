@@ -15,7 +15,7 @@ module MMA_WallsAndSlabs
 
     extension.description = 'Parametric multi-layer walls, slabs, and openings in millimeters.'
     extension.version     = '2.0.0'
-    extension.creator     = 'Diego Delfino @ MMA Projects'
+    extension.creator     = 'Diego Delfino @ MMA Projects SRL'
     extension.copyright   = '2026'
 
     Sketchup.register_extension(extension, true)
