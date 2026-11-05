@@ -161,6 +161,12 @@ input, select {
   margin-top: 8px;
 }
 
+.layer-order-hint {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 .layer-section-title {
   display: flex;
   justify-content: space-between;
@@ -175,6 +181,15 @@ input, select {
   gap: 5px;
   align-items: center;
   margin: 5px 0;
+  cursor: grab;
+}
+
+.layer-row:active {
+  cursor: grabbing;
+}
+
+.layer-row[draggable="true"]:hover {
+  background: #f1f5f9;
 }
 
 .layer-row input,

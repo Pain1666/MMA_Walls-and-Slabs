@@ -36,14 +36,28 @@
         <input type="number" id="wall-height" value="2800" min="100" step="50" required>
       </div>
       <div class="form-group">
-        <label>Justification</label>
+        <label>Wall position relative to drawn line</label>
         <select id="wall-justification">
           <option value="center">Center</option>
-          <option value="left">Left Face</option>
-          <option value="right">Right Face</option>
+          <option value="inner">Inner side</option>
+          <option value="outer">Outer side</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="wall-end-wrap">Wrap wall ends</label>
+        <select id="wall-end-wrap">
+          <option value="none">None</option>
+          <option value="inner">Inner layer</option>
+          <option value="outer">Outer layer</option>
         </select>
       </div>
     </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Exterior Layers</div>
+    <p class="layer-order-hint">Drag to reorder layers on each side of the structural core.</p>
+    <div id="exterior-layers" class="layer-list"></div>
   </div>
 
   <div class="card">
@@ -67,8 +81,8 @@
   </div>
 
   <div class="card">
-    <div class="card-title">Wall Layers</div>
-    <div id="wall-layers"></div>
+    <div class="card-title">Interior Layers</div>
+    <div id="interior-layers" class="layer-list"></div>
   </div>
 
   <div class="actions-bar">

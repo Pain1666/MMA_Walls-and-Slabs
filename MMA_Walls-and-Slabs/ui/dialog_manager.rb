@@ -22,6 +22,7 @@ module MMA_WallsAndSlabs
       'core_type' => CoreType::HOLLOW_BRICK,
       'core_thickness' => Defaults::CORE_THICKNESS[CoreType::HOLLOW_BRICK],
       'core_material' => 'MMA_Brick',
+      'end_wrap' => 'none',
       'wall_type' => WallPresets::GENERIC,
       'ext_layers' => [
         { 'name' => 'Intonaco esterno', 'thickness' => 15.0, 'material' => 'MMA_Render_Ext', 'enabled' => true },
@@ -117,7 +118,7 @@ module MMA_WallsAndSlabs
     end
 
     def self.wall_type_settings(params)
-      keys = %w[height justification core_type core_thickness core_material ext_layers int_layers]
+      keys = %w[height justification end_wrap core_type core_thickness core_material ext_layers int_layers]
       settings = params.select { |key, _value| keys.include?(key.to_s) }
       duplicate(settings)
     end
@@ -339,7 +340,10 @@ module MMA_WallsAndSlabs
       end
       data['ext_layers'] ||= []
       data['int_layers'] ||= []
+      data['justification'] = { 'left' => WallJustification::OUTER, 'right' => WallJustification::INNER }
+                                 .fetch(data['justification'].to_s, data['justification'])
       data['justification'] = Defaults::WALL_JUSTIFICATION unless WallJustification::ALL.include?(data['justification'])
+      data['end_wrap'] = 'none' unless %w[none inner outer].include?(data['end_wrap'].to_s)
     end
 
     def self.validate_slab_settings(data)

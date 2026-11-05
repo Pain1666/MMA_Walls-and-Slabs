@@ -30,8 +30,8 @@ module MMA_WallsAndSlabs
     def boundaries(thicknesses, justification)
       total = thicknesses.sum
       base = case justification.to_s
-             when 'left' then 0.0
-             when 'right' then -total
+             when 'outer', 'left' then 0.0
+             when 'inner', 'right' then -total
              else -total / 2.0
              end
       offsets = [base]

@@ -24,6 +24,7 @@ module MMA_WallsAndSlabs
       @point_ips = []
       @current_point = nil
       @snap_axis = nil
+      @axis_snap_enabled = true
       @closing = false
       @reference = nil
       @snap_anchor = nil
@@ -35,11 +36,12 @@ module MMA_WallsAndSlabs
       @point_ips.clear
       @current_point = nil
       @snap_axis = nil
+      @axis_snap_enabled = true
       @closing = false
       @reference = nil
       @snap_anchor = nil
       @ip.clear
-      Sketchup.status_text = 'MMA Wall Tool: Click the start point, then add points; press Enter or double-click to create.'
+      Sketchup.status_text = status_text
     end
 
     def onMouseMove(flags, x, y, view)
@@ -87,7 +89,13 @@ module MMA_WallsAndSlabs
     end
 
     def onKeyDown(key, repeat, flags, view)
-      finish_wall(closed: @closing) if (key == 13 || key == 10) && @points.length >= 2
+      if key == 65 || key == 97
+        @axis_snap_enabled = !@axis_snap_enabled
+        @snap_axis = nil
+        Sketchup.status_text = status_text
+      elsif (key == 13 || key == 10) && @points.length >= 2
+        finish_wall(closed: @closing)
+      end
       view.invalidate
     end
 
@@ -132,7 +140,7 @@ module MMA_WallsAndSlabs
         @current_point = nil
         @reference = nil
         @wall_params = nil
-        Sketchup.status_text = 'MMA Wall Tool: Click the start point, then add points; press Enter or double-click to create.'
+        Sketchup.status_text = status_text
       end
       @snap_axis = nil
       @closing = false
@@ -271,6 +279,7 @@ module MMA_WallsAndSlabs
     end
 
     def constrained_point(point, origin)
+      return point unless @axis_snap_enabled
       return point unless origin
 
       dx = point.x - origin.x
@@ -327,11 +336,7 @@ module MMA_WallsAndSlabs
         layer['enabled'] != false && layer['thickness'].to_f > 0.001
       end
       total_thickness = layers.sum { |layer| GeometryHelper.mm(layer['thickness']) }
-      offset = case @wall_params['justification'].to_s
-               when WallJustification::LEFT then 0.0
-               when WallJustification::RIGHT then -total_thickness
-               else -total_thickness / 2.0
-               end
+      offset = WallBuilder.alignment_offset(@wall_params['justification'], total_thickness)
 
       layers.each do |layer|
         thickness = GeometryHelper.mm(layer['thickness'])
@@ -386,11 +391,12 @@ module MMA_WallsAndSlabs
              end
       axis += " (snapped to #{@snap_label})" if @snap_anchor && @snap_label
       axis += ' (aligned to wall face)' if @reference
-      return "MMA Wall Tool: Click the start point#{axis}." if @points.empty?
+      alignment = @axis_snap_enabled ? 'axis alignment on (A to disable)' : 'axis alignment off (A to enable)'
+      return "MMA Wall Tool: Click the start point; #{alignment}#{axis}." if @points.empty?
 
       close_hint = @points.length >= 3 ? ', click the start point to close' : ''
       close_status = @closing ? ' (loop will close)' : ''
-      "MMA Wall Tool: #{@points.length} points; click to continue#{close_hint}, Enter/double-click to create, Esc to undo last point#{axis}#{close_status}."
+      "MMA Wall Tool: #{@points.length} points; click to continue#{close_hint}, Enter/double-click to create, Esc to undo last point; #{alignment}#{axis}#{close_status}."
     end
 
     def finish_wall(closed: false)

@@ -140,6 +140,17 @@ module MMA_WallsAndSlabs
                            stacks, bounds, active, closed, corner_table, max_total)
         cumulative_distance += length
       end
+      wrap_position = end_wrap_spec(path_params, active)
+      if !wrap_position.nil? && !closed
+        start_layer = stacks.first[wrap_position]
+        end_layer = stacks.last[wrap_position]
+        build_end_wrap(model, path_group.entities, path_points.first, directions.first, bounds.first,
+                       (path_params['height'] || Defaults::WALL_HEIGHT).to_f,
+                       start_layer, true) unless corner_table['start']
+        build_end_wrap(model, path_group.entities, path_points.last, directions.last, bounds.last,
+                       (path_params['height'] || Defaults::WALL_HEIGHT).to_f,
+                       end_layer, false) unless corner_table['end']
+      end
 
       model.commit_operation
       operation_started = false
@@ -212,6 +223,17 @@ module MMA_WallsAndSlabs
         face.back_material = material if material
         face.pushpull(face.normal.z.positive? ? height : -height)
       end
+      wrap_position = end_wrap_spec(params, active)
+      if wrap_position
+        direction = [Math.cos(start + (Math::PI / 2.0) * (sweep < 0 ? -1 : 1)),
+                     Math.sin(start + (Math::PI / 2.0) * (sweep < 0 ? -1 : 1))]
+        end_angle = start + sweep
+        end_direction = [Math.cos(end_angle + (Math::PI / 2.0) * (sweep < 0 ? -1 : 1)),
+                         Math.sin(end_angle + (Math::PI / 2.0) * (sweep < 0 ? -1 : 1))]
+        start_layer = stack[wrap_position]
+        build_end_wrap(model, group.entities, path_points.first, direction, bounds, height_mm, start_layer, true)
+        build_end_wrap(model, group.entities, path_points.last, end_direction, bounds, height_mm, stack[wrap_position], false)
+      end
 
       model.commit_operation
       operation_started = false
@@ -254,6 +276,56 @@ module MMA_WallsAndSlabs
 
     def self.stack_thicknesses(stack)
       stack.map { |layer| layer['thickness'].to_f }
+    end
+
+    def self.alignment_offset(justification, total_thickness)
+      SegmentLayers.boundaries([total_thickness], justification).first
+    end
+
+    def self.end_wrap_spec(params, active)
+      side = params['end_wrap'].to_s
+      return nil unless %w[inner outer].include?(side)
+
+      full_layers = wall_layers(params)
+      exterior_count = Array(params['ext_layers']).length
+      interior_start = full_layers.length - Array(params['int_layers']).length
+      candidates = case side
+                   when 'outer' then active.select { |index| index < exterior_count }
+                   when 'inner' then active.select { |index| index >= interior_start }
+                   end
+      full_index = if candidates.empty?
+                     side == 'outer' ? active.first : active.last
+                   else
+                     side == 'outer' ? candidates.first : candidates.last
+                   end
+      active.index(full_index)
+    end
+
+    def self.build_end_wrap(model, entities, point, direction, bounds, height, layer, at_start)
+      thickness = layer['thickness'].to_f
+      return if thickness <= 0.001 || height.to_f <= 0.001
+
+      normal = [-direction[1], direction[0]]
+      low_offset, high_offset = bounds.minmax
+      low = [point[0] + normal[0] * low_offset, point[1] + normal[1] * low_offset, point[2]]
+      high = [point[0] + normal[0] * high_offset, point[1] + normal[1] * high_offset, point[2]]
+      face_points = [low, high, [high[0], high[1], high[2] + height],
+                     [low[0], low[1], low[2] + height]]
+      wrap_group = entities.add_group
+      wrap_group.name = "End wrap: #{layer['name']}"
+      material = GeometryHelper.get_or_create_material(model, layer['material'])
+      wrap_group.material = material if material
+      face = wrap_group.entities.add_face(face_points.map do |coordinates|
+        Geom::Point3d.new(*coordinates.map { |value| GeometryHelper.mm(value) })
+      end)
+      raise ArgumentError, "Could not create the #{at_start ? 'start' : 'end'} wall wrap." unless face
+
+      inward = at_start ? direction : direction.map { |value| -value }
+      normal_dot = face.normal.x * inward[0] + face.normal.y * inward[1]
+      face.pushpull(GeometryHelper.mm(thickness * (normal_dot.positive? ? 1.0 : -1.0)))
+      face.material = material if material
+      face.back_material = material if material
+      wrap_group
     end
 
     # Boundary offsets of the wall end at the start or end of an open path.

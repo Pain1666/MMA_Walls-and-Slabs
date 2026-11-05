@@ -354,11 +354,7 @@ module MMA_WallsAndSlabs
       return [] if layer_specs.empty?
 
       total = layer_specs.sum { |layer, _index| layer['thickness'].to_f }
-      base = case wall_model.justification
-             when WallJustification::LEFT then 0.0
-             when WallJustification::RIGHT then -total
-             else -total / 2.0
-             end
+      base = WallBuilder.alignment_offset(wall_model.justification, total)
       start_direction = unit_direction(points[0], points[1])
       end_direction = unit_direction(points[-2], points[-1])
       start_extensions = Array(wall_model.params['layer_start_extensions'])
@@ -600,11 +596,7 @@ module MMA_WallsAndSlabs
       end
       return if layers.empty?
       total_thickness = layers.sum { |layer| layer['thickness'].to_f }
-      offset = case wall_model.justification
-               when WallJustification::LEFT then 0.0
-               when WallJustification::RIGHT then -total_thickness
-               else -total_thickness / 2.0
-               end
+      offset = WallBuilder.alignment_offset(wall_model.justification, total_thickness)
       max_miter = total_thickness * 4.0
       height = wall_model.height
       path_length = segment_count.times.sum do |index|

@@ -15,6 +15,7 @@ module MMA_WallsAndSlabs
       'core_type' => CoreType::HOLLOW_BRICK,
       'core_thickness' => Defaults::CORE_THICKNESS[CoreType::HOLLOW_BRICK],
       'core_material' => 'MMA_Brick',
+      'end_wrap' => 'none',
       'wall_type' => WallPresets::GENERIC,
       'start_point' => [0.0, 0.0, 0.0],
       'end_point' => [1000.0, 0.0, 0.0],

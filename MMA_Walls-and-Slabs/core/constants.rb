@@ -113,9 +113,11 @@ module MMA_WallsAndSlabs
 
   module WallJustification
     CENTER = 'center'
-    LEFT = 'left'
-    RIGHT = 'right'
-    ALL = [CENTER, LEFT, RIGHT].freeze
+    INNER = 'inner'
+    OUTER = 'outer'
+    LEFT = OUTER
+    RIGHT = INNER
+    ALL = [CENTER, INNER, OUTER].freeze
   end
 
   module WallTypeCatalog

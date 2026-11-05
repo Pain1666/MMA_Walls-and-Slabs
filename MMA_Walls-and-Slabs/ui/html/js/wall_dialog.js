@@ -2,6 +2,7 @@ let currentWallData = {
   height: 2800,
   justification: 'center',
   core_type: 'hollow_brick',
+  end_wrap: 'none',
   core_thickness: 250,
   core_material: 'MMA_Brick',
   ext_layers: [
@@ -42,22 +43,23 @@ function renderWallData() {
   currentWallData.ext_layers = Array.isArray(currentWallData.ext_layers) ? currentWallData.ext_layers : [];
   currentWallData.int_layers = Array.isArray(currentWallData.int_layers) ? currentWallData.int_layers : [];
   document.getElementById('wall-height').value = currentWallData.height || 2800;
-  document.getElementById('wall-justification').value = currentWallData.justification || 'center';
+  const alignment = currentWallData.justification || 'center';
+  document.getElementById('wall-justification').value =
+    alignment === 'left' ? 'outer' : (alignment === 'right' ? 'inner' : alignment);
+  document.getElementById('wall-end-wrap').value = currentWallData.end_wrap || 'none';
   document.getElementById('core-type').value = currentWallData.core_type || 'hollow_brick';
   document.getElementById('core-thickness').value = currentWallData.core_thickness == null ? 250 : currentWallData.core_thickness;
   renderLayerEditors();
 }
 
 function renderLayerEditors() {
-  const container = document.getElementById('wall-layers');
-  container.replaceChildren();
-  [['Exterior layers', 'ext_layers'], ['Interior layers', 'int_layers']].forEach(([title, key]) => {
+  [['Exterior layers', 'ext_layers', 'exterior-layers'], ['Interior layers', 'int_layers', 'interior-layers']].forEach(([title, key, containerId]) => {
+    const container = document.getElementById(containerId);
+    container.replaceChildren();
     const section = document.createElement('div');
     section.className = 'layer-section';
     const heading = document.createElement('div');
     heading.className = 'layer-section-title';
-    const label = document.createElement('span');
-    label.textContent = title;
     const add = document.createElement('button');
     add.type = 'button';
     add.textContent = 'Add layer';
@@ -65,11 +67,28 @@ function renderLayerEditors() {
       currentWallData[key].push({ name: 'New layer', thickness: 10, material: '', enabled: true });
       renderLayerEditors();
     });
-    heading.append(label, add);
+    heading.appendChild(add);
     section.appendChild(heading);
+    let draggedIndex = null;
     currentWallData[key].forEach((layer, index) => {
       const row = document.createElement('div');
       row.className = 'layer-row';
+      row.draggable = true;
+      row.addEventListener('dragstart', event => {
+        draggedIndex = index;
+        event.dataTransfer.effectAllowed = 'move';
+      });
+      row.addEventListener('dragover', event => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+      });
+      row.addEventListener('drop', event => {
+        event.preventDefault();
+        if (draggedIndex === null || draggedIndex === index) return;
+        const [movedLayer] = currentWallData[key].splice(draggedIndex, 1);
+        currentWallData[key].splice(index, 0, movedLayer);
+        renderLayerEditors();
+      });
       const name = document.createElement('input');
       name.value = layer.name || '';
       name.setAttribute('aria-label', `${title} ${index + 1} name`);
@@ -176,6 +195,7 @@ function newWallType() {
     height: 2800,
     justification: 'center',
     core_type: 'hollow_brick',
+    end_wrap: 'none',
     core_thickness: 250,
     core_material: 'MMA_Brick',
     ext_layers: [],
@@ -191,6 +211,7 @@ function newWallType() {
 function readWallForm() {
   currentWallData.height = parseFloat(document.getElementById('wall-height').value);
   currentWallData.justification = document.getElementById('wall-justification').value;
+  currentWallData.end_wrap = document.getElementById('wall-end-wrap').value;
   currentWallData.core_type = document.getElementById('core-type').value;
   currentWallData.core_thickness = parseFloat(document.getElementById('core-thickness').value);
   const coreMaterials = {

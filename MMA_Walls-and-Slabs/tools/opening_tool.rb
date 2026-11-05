@@ -178,11 +178,7 @@ module MMA_WallsAndSlabs
         layer['enabled'] != false && layer['thickness'].to_f.positive?
       end
       total_thickness = enabled_layers.sum { |layer| layer['thickness'].to_f }
-      base_offset = case wall.justification
-                    when WallJustification::LEFT then 0.0
-                    when WallJustification::RIGHT then -total_thickness
-                    else -total_thickness / 2.0
-                    end
+      base_offset = WallBuilder.alignment_offset(wall.justification, total_thickness)
       side_limits = [base_offset, base_offset + total_thickness].minmax
       face_offset = [[nearest[:side_offset], side_limits[0]].max, side_limits[1]].min
       anchor = [

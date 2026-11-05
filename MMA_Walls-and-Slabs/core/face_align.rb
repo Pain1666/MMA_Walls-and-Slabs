@@ -15,7 +15,7 @@ module MMA_WallsAndSlabs
     #   face_point   - [x, y, z] on the picked face
     #   side_normal  - [x, y] pointing away from the existing wall
     #   total        - total thickness of the new wall
-    #   justification - 'left', 'center' or 'right'
+    #   justification - 'outer', 'center' or 'inner'
     # Returns { origin: [x, y, z], direction: [dx, dy] }. The wall's left normal
     # equals side_normal, so its layers stand on the chosen side.
     def reference(face_point, side_normal, total, justification)
@@ -25,8 +25,8 @@ module MMA_WallsAndSlabs
       # Distance from the face to the centre line, so that the near face of
       # the new wall is exactly on the face.
       distance = case justification.to_s
-                 when 'left' then 0.0
-                 when 'right' then total
+                 when 'outer', 'left' then 0.0
+                 when 'inner', 'right' then total
                  else total / 2.0
                  end
       origin = [face_point[0] + (nx * distance), face_point[1] + (ny * distance), face_point[2]]
