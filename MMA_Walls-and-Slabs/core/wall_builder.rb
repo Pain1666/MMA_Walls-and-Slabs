@@ -125,6 +125,17 @@ module MMA_WallsAndSlabs
         group.material = material if material
         group
       end
+      wrap_positions = closed ? [] : end_wrap_positions(path_params, active)
+      start_wrap_layers = wrap_positions.map { |position| stacks.first[position] }
+      end_wrap_layers = wrap_positions.map { |position| stacks.last[position] }
+      start_wrap_layers = [] if corner_table['start']
+      end_wrap_layers = [] if corner_table['end']
+      validate_end_wrap_depths(
+        start_wrap_layers, end_wrap_layers,
+        point_distance_2d(path_points[0], path_points[1]),
+        point_distance_2d(path_points[-2], path_points[-1]),
+        segment_count == 1
+      )
 
       path_length = segment_count.times.sum do |index|
         point_distance_2d(path_points[index], path_points[(index + 1) % path_points.length])
@@ -136,21 +147,18 @@ module MMA_WallsAndSlabs
         length = point_distance_2d(start_point, end_point)
         local_openings = path_openings_for_segment(params, cumulative_distance, length, path_length, closed)
         segment_params = params.merge('openings' => local_openings)
+        start_trim = index.zero? ? start_wrap_layers.sum { |layer| layer['thickness'].to_f } : 0.0
+        end_trim = index == segment_count - 1 ? end_wrap_layers.sum { |layer| layer['thickness'].to_f } : 0.0
         build_path_segment(model, segment_params, path_points, directions, index, layer_groups,
-                           stacks, bounds, active, closed, corner_table, max_total)
+                           stacks, bounds, active, closed, corner_table, max_total, start_trim, end_trim)
         cumulative_distance += length
       end
-      wrap_position = end_wrap_spec(path_params, active)
-      if !wrap_position.nil? && !closed
-        start_layer = stacks.first[wrap_position]
-        end_layer = stacks.last[wrap_position]
-        build_end_wrap(model, path_group.entities, path_points.first, directions.first, bounds.first,
-                       (path_params['height'] || Defaults::WALL_HEIGHT).to_f,
-                       start_layer, true) unless corner_table['start']
-        build_end_wrap(model, path_group.entities, path_points.last, directions.last, bounds.last,
-                       (path_params['height'] || Defaults::WALL_HEIGHT).to_f,
-                       end_layer, false) unless corner_table['end']
-      end
+      build_end_wrap(model, path_group.entities, path_points.first, directions.first, bounds.first,
+                     (path_params['height'] || Defaults::WALL_HEIGHT).to_f,
+                     start_wrap_layers, true) unless start_wrap_layers.empty?
+      build_end_wrap(model, path_group.entities, path_points.last, directions.last, bounds.last,
+                     (path_params['height'] || Defaults::WALL_HEIGHT).to_f,
+                     end_wrap_layers, false) unless end_wrap_layers.empty?
 
       model.commit_operation
       operation_started = false
@@ -201,6 +209,18 @@ module MMA_WallsAndSlabs
       group.set_attribute(DICT_NAME, ATTR_TYPE, 'wall')
       serialize_group_data(group, stored)
 
+      wrap_positions = end_wrap_positions(params, active)
+      wrap_start_layers = wrap_positions.map { |position| stack[position] }
+      wrap_end_layers = wrap_start_layers.map(&:dup)
+      start_wrap_depth = wrap_start_layers.sum { |layer| layer['thickness'].to_f }
+      end_wrap_depth = wrap_end_layers.sum { |layer| layer['thickness'].to_f }
+      turn = sweep.positive? ? 1.0 : -1.0
+      validate_end_wrap_depths(wrap_start_layers, wrap_end_layers, sweep.abs * radius,
+                               sweep.abs * radius, true)
+      if !wrap_start_layers.empty? &&
+         radii.any? { |boundary_radius| sweep.abs - ((start_wrap_depth + end_wrap_depth) / boundary_radius) <= 0.001 }
+        raise ArgumentError, 'The curved wall is too short to wrap its selected layers.'
+      end
       height = GeometryHelper.mm(height_mm)
       stack.each_with_index do |layer, index|
         thickness = layer['thickness'].to_f
@@ -211,8 +231,12 @@ module MMA_WallsAndSlabs
         material = GeometryHelper.get_or_create_material(model, layer['material'])
         layer_group.material = material if material
 
-        outer = ArcGeometry.sample(center, radii[index], start, sweep)
-        inner = ArcGeometry.sample(center, radii[index + 1], start, sweep).reverse
+        outer_start = start + (turn * start_wrap_depth / radii[index])
+        outer_end = start + sweep - (turn * end_wrap_depth / radii[index])
+        inner_start = start + (turn * start_wrap_depth / radii[index + 1])
+        inner_end = start + sweep - (turn * end_wrap_depth / radii[index + 1])
+        outer = ArcGeometry.sample(center, radii[index], outer_start, outer_end - outer_start)
+        inner = ArcGeometry.sample(center, radii[index + 1], inner_start, inner_end - inner_start).reverse
         ring = (outer + inner).map do |x, y|
           Geom::Point3d.new(GeometryHelper.mm(x), GeometryHelper.mm(y), GeometryHelper.mm(z))
         end
@@ -223,16 +247,16 @@ module MMA_WallsAndSlabs
         face.back_material = material if material
         face.pushpull(face.normal.z.positive? ? height : -height)
       end
-      wrap_position = end_wrap_spec(params, active)
-      if wrap_position
+      if !wrap_start_layers.empty?
         direction = [Math.cos(start + (Math::PI / 2.0) * (sweep < 0 ? -1 : 1)),
                      Math.sin(start + (Math::PI / 2.0) * (sweep < 0 ? -1 : 1))]
         end_angle = start + sweep
         end_direction = [Math.cos(end_angle + (Math::PI / 2.0) * (sweep < 0 ? -1 : 1)),
                          Math.sin(end_angle + (Math::PI / 2.0) * (sweep < 0 ? -1 : 1))]
-        start_layer = stack[wrap_position]
-        build_end_wrap(model, group.entities, path_points.first, direction, bounds, height_mm, start_layer, true)
-        build_end_wrap(model, group.entities, path_points.last, end_direction, bounds, height_mm, stack[wrap_position], false)
+        build_end_wrap(model, group.entities, path_points.first, direction, bounds, height_mm,
+                       wrap_start_layers, true)
+        build_end_wrap(model, group.entities, path_points.last, end_direction, bounds, height_mm,
+                       wrap_end_layers, false)
       end
 
       model.commit_operation
@@ -282,50 +306,72 @@ module MMA_WallsAndSlabs
       SegmentLayers.boundaries([total_thickness], justification).first
     end
 
-    def self.end_wrap_spec(params, active)
+    def self.end_wrap_positions(params, active)
       side = params['end_wrap'].to_s
-      return nil unless %w[inner outer].include?(side)
+      return [] unless %w[inner outer].include?(side)
 
       full_layers = wall_layers(params)
       exterior_count = Array(params['ext_layers']).length
       interior_start = full_layers.length - Array(params['int_layers']).length
       candidates = case side
                    when 'outer' then active.select { |index| index < exterior_count }
-                   when 'inner' then active.select { |index| index >= interior_start }
+                   when 'inner' then active.select { |index| index >= interior_start }.reverse
                    end
-      full_index = if candidates.empty?
-                     side == 'outer' ? active.first : active.last
-                   else
-                     side == 'outer' ? candidates.first : candidates.last
-                   end
-      active.index(full_index)
+      candidates.map { |full_index| active.index(full_index) }
     end
 
-    def self.build_end_wrap(model, entities, point, direction, bounds, height, layer, at_start)
-      thickness = layer['thickness'].to_f
-      return if thickness <= 0.001 || height.to_f <= 0.001
+    def self.validate_end_wrap_depths(start_layers, end_layers, start_segment_length,
+                                      end_segment_length, same_segment = false)
+      start_depth = start_layers.sum { |layer| layer['thickness'].to_f }
+      end_depth = end_layers.sum { |layer| layer['thickness'].to_f }
+      if start_depth > start_segment_length + 0.001
+        raise ArgumentError, 'The wall is too short to wrap its selected layers at the start.'
+      end
+      if end_depth > end_segment_length + 0.001
+        raise ArgumentError, 'The wall is too short to wrap its selected layers at the end.'
+      end
+      if same_segment && start_depth + end_depth > start_segment_length + 0.001
+        raise ArgumentError, 'The wall is too short to wrap its selected layers at both ends.'
+      end
+    end
+
+    def self.build_end_wrap(model, entities, point, direction, bounds, height, layers, at_start)
+      return if layers.empty? || height.to_f <= 0.001
 
       normal = [-direction[1], direction[0]]
       low_offset, high_offset = bounds.minmax
-      low = [point[0] + normal[0] * low_offset, point[1] + normal[1] * low_offset, point[2]]
-      high = [point[0] + normal[0] * high_offset, point[1] + normal[1] * high_offset, point[2]]
-      face_points = [low, high, [high[0], high[1], high[2] + height],
-                     [low[0], low[1], low[2] + height]]
-      wrap_group = entities.add_group
-      wrap_group.name = "End wrap: #{layer['name']}"
-      material = GeometryHelper.get_or_create_material(model, layer['material'])
-      wrap_group.material = material if material
-      face = wrap_group.entities.add_face(face_points.map do |coordinates|
-        Geom::Point3d.new(*coordinates.map { |value| GeometryHelper.mm(value) })
-      end)
-      raise ArgumentError, "Could not create the #{at_start ? 'start' : 'end'} wall wrap." unless face
-
       inward = at_start ? direction : direction.map { |value| -value }
-      normal_dot = face.normal.x * inward[0] + face.normal.y * inward[1]
-      face.pushpull(GeometryHelper.mm(thickness * (normal_dot.positive? ? 1.0 : -1.0)))
-      face.material = material if material
-      face.back_material = material if material
-      wrap_group
+      distance = 0.0
+      layers.each do |layer|
+        thickness = layer['thickness'].to_f
+        next if thickness <= 0.001
+
+        base_point = [
+          point[0] + inward[0] * distance,
+          point[1] + inward[1] * distance,
+          point[2]
+        ]
+        low = [base_point[0] + normal[0] * low_offset,
+               base_point[1] + normal[1] * low_offset, base_point[2]]
+        high = [base_point[0] + normal[0] * high_offset,
+                base_point[1] + normal[1] * high_offset, base_point[2]]
+        face_points = [low, high, [high[0], high[1], high[2] + height],
+                       [low[0], low[1], low[2] + height]]
+        wrap_group = entities.add_group
+        wrap_group.name = "End wrap: #{layer['name']}"
+        material = GeometryHelper.get_or_create_material(model, layer['material'])
+        wrap_group.material = material if material
+        face = wrap_group.entities.add_face(face_points.map do |coordinates|
+          Geom::Point3d.new(*coordinates.map { |value| GeometryHelper.mm(value) })
+        end)
+        raise ArgumentError, "Could not create the #{at_start ? 'start' : 'end'} wall wrap for '#{layer['name']}'." unless face
+
+        normal_dot = face.normal.x * inward[0] + face.normal.y * inward[1]
+        face.pushpull(GeometryHelper.mm(thickness * (normal_dot.positive? ? 1.0 : -1.0)))
+        face.material = material if material
+        face.back_material = material if material
+        distance += thickness
+      end
     end
 
     # Boundary offsets of the wall end at the start or end of an open path.
@@ -509,7 +555,8 @@ module MMA_WallsAndSlabs
     # of segment i; a vertex is mitred between the offsets of the two segments
     # that meet there, so segments with different thicknesses join cleanly.
     def self.build_path_segment(model, params, path_points, directions, index, layer_groups,
-                                stacks, bounds, active, closed, joint_table, max_total)
+                                stacks, bounds, active, closed, joint_table, max_total,
+                                start_trim = 0.0, end_trim = 0.0)
       height_mm = (params['height'] || Defaults::WALL_HEIGHT).to_f
       raise ArgumentError, 'Wall height must be greater than zero.' unless height_mm.positive?
 
@@ -522,6 +569,8 @@ module MMA_WallsAndSlabs
       end_point = path_points[segment_end_index]
       direction = directions[index]
       length = Math.sqrt((end_point[0] - start_point[0])**2 + (end_point[1] - start_point[1])**2)
+      body_start = index.zero? && !closed ? start_trim : 0.0
+      body_end = index == path_points.length - 2 && !closed ? length - end_trim : length
 
       own = bounds[index]
       # Offsets of the segments on either side of the two vertices. For an open
@@ -536,7 +585,11 @@ module MMA_WallsAndSlabs
         opening.is_a?(Hash) && opening.key?('position') &&
           opening['width'].to_f.positive? && opening['height'].to_f.positive?
       end
-      patches = wall_patches(length, height_mm, openings)
+      patches = wall_patches(length, height_mm, openings).filter_map do |left, right, bottom, top|
+        clipped_left = [left, body_start].max
+        clipped_right = [right, body_end].min
+        [clipped_left, clipped_right, bottom, top] if clipped_right - clipped_left > 0.001
+      end
 
       active.each_with_index do |full_index, layer_index|
         layer = stacks[index][layer_index]
@@ -556,6 +609,14 @@ module MMA_WallsAndSlabs
                                        prev_bounds[layer_index + 1], upper, closed, max_miter_distance)
         high_end = path_offset_point(path_points, directions, segment_end_index,
                                      upper, next_bounds[layer_index + 1], closed, max_miter_distance)
+        if body_start > 0.001
+          low_start = path_station_point(start_point, direction, own[layer_index], body_start)
+          high_start = path_station_point(start_point, direction, upper, body_start)
+        end
+        if body_end < length - 0.001
+          low_end = path_station_point(start_point, direction, own[layer_index], body_end)
+          high_end = path_station_point(start_point, direction, upper, body_end)
+        end
 
         # Joined ends use the mitred corners shared with the neighbouring wall.
         start_joined = joint_pair?(start_corners, layer_index)
@@ -572,21 +633,22 @@ module MMA_WallsAndSlabs
         unless closed
           start_extension = Array(params['layer_start_extensions'])[full_index].to_f
           end_extension = Array(params['layer_end_extensions'])[full_index].to_f
-          if index.zero? && !start_extension.zero? && !start_joined
+          if index.zero? && body_start <= 0.001 && !start_extension.zero? && !start_joined
             low_start = extend_path_endpoint(low_start, directions[index], start_extension, true)
             high_start = extend_path_endpoint(high_start, directions[index], start_extension, true)
           end
-          if index == path_points.length - 2 && !end_extension.zero? && !end_joined
+          if index == path_points.length - 2 && body_end >= length - 0.001 &&
+             !end_extension.zero? && !end_joined
             low_end = extend_path_endpoint(low_end, directions[index], end_extension, false)
             high_end = extend_path_endpoint(high_end, directions[index], end_extension, false)
           end
         end
 
         patches.each do |left, right, bottom, top|
-          low_left = left <= 0.001 ? low_start : path_station_point(start_point, direction, offset, left)
-          low_right = right >= length - 0.001 ? low_end : path_station_point(start_point, direction, offset, right)
-          high_right = right >= length - 0.001 ? high_end : path_station_point(start_point, direction, upper, right)
-          high_left = left <= 0.001 ? high_start : path_station_point(start_point, direction, upper, left)
+          low_left = left <= body_start + 0.001 ? low_start : path_station_point(start_point, direction, offset, left)
+          low_right = right >= body_end - 0.001 ? low_end : path_station_point(start_point, direction, offset, right)
+          high_right = right >= body_end - 0.001 ? high_end : path_station_point(start_point, direction, upper, right)
+          high_left = left <= body_start + 0.001 ? high_start : path_station_point(start_point, direction, upper, left)
           footprint = [low_left, low_right, high_right, high_left].map do |point|
             Geom::Point3d.new(
               GeometryHelper.mm(point[0]),
