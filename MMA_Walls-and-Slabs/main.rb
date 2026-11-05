@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 # ==============================================================================
 # MMA_Walls-and-Slabs - Main Plugin Loader & Menu/Toolbar Setup
-# ==============================================================================
+# ============================================================================== 
 
 require 'sketchup.rb'
 
@@ -16,6 +16,7 @@ require_relative 'ui/dialog_manager'
 require_relative 'tools/draw_wall_tool'
 require_relative 'tools/draw_arc_wall_tool'
 require_relative 'tools/draw_slab_tool'
+require_relative 'tools/selection_tools'
 require_relative 'tools/opening_tool'
 require_relative 'tools/join_wall_tool'
 require_relative 'tools/edit_wall_tool'
@@ -32,6 +33,17 @@ module MMA_WallsAndSlabs
     cmd_draw_wall.small_icon = File.join(icon_dir, 'wall_16.png')
     cmd_draw_wall.large_icon = File.join(icon_dir, 'wall_24.png')
 
+    cmd_wall_from_selection = UI::Command.new('Wall from Selected Path') do
+      begin
+        path = SelectionTools.wall_path(Sketchup.active_model.selection)
+        DialogManager.show_wall_dialog(nil, create_wall: true, selection_path: path)
+      rescue StandardError => error
+        UI.messagebox("Could not create wall from selection: #{error.message}")
+      end
+    end
+    cmd_wall_from_selection.tooltip = 'Create a layered wall from selected connected edges'
+    cmd_wall_from_selection.status_bar_text = 'Select one connected polyline or curve, then start this command.'
+
     cmd_draw_arc_wall = UI::Command.new('Draw Curved Wall') do
       model = Sketchup.active_model
       model.select_tool(DrawArcWallTool.new) if model
@@ -47,6 +59,17 @@ module MMA_WallsAndSlabs
     cmd_draw_slab.status_bar_text = 'Click slab vertices and press Enter to finish.'
     cmd_draw_slab.small_icon = File.join(icon_dir, 'slab_16.png')
     cmd_draw_slab.large_icon = File.join(icon_dir, 'slab_24.png')
+
+    cmd_slab_from_face = UI::Command.new('Slab from Selected Face') do
+      begin
+        face = SelectionTools.selected_face(Sketchup.active_model.selection)
+        DialogManager.show_slab_dialog(nil, create_from_face: face)
+      rescue StandardError => error
+        UI.messagebox("Could not create slab from selection: #{error.message}")
+      end
+    end
+    cmd_slab_from_face.tooltip = 'Create a layered slab following a selected face'
+    cmd_slab_from_face.status_bar_text = 'Select one face, then start this command.'
 
     cmd_opening = UI::Command.new('Opening Tool') do
       DialogManager.show_opening_dialog
@@ -118,8 +141,10 @@ module MMA_WallsAndSlabs
 
     toolbar = UI::Toolbar.new('MMA_WallsAndSlabs')
     toolbar.add_item(cmd_draw_wall)
+    toolbar.add_item(cmd_wall_from_selection)
     toolbar.add_item(cmd_draw_arc_wall)
     toolbar.add_item(cmd_draw_slab)
+    toolbar.add_item(cmd_slab_from_face)
     toolbar.add_item(cmd_opening)
     join_commands.each { |command| toolbar.add_item(command) }
     toolbar.add_item(cmd_edit_wall)
@@ -130,8 +155,9 @@ module MMA_WallsAndSlabs
     toolbar.show
 
     menu = UI.menu('Extensions').add_submenu('MMA Walls and Slabs')
-    [cmd_draw_wall, cmd_draw_arc_wall, cmd_draw_slab, cmd_opening, *join_commands, cmd_edit_wall,
-     cmd_wall_dialog, cmd_slab_dialog, cmd_opening_dialog].each do |command|
+    [cmd_draw_wall, cmd_wall_from_selection, cmd_draw_arc_wall, cmd_draw_slab, cmd_slab_from_face,
+     cmd_opening, *join_commands, cmd_edit_wall, cmd_wall_dialog, cmd_slab_dialog,
+     cmd_opening_dialog].each do |command|
       menu.add_item(command)
     end
 

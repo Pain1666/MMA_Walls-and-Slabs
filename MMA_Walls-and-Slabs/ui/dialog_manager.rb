@@ -1,7 +1,7 @@
 # frozen_string_literal: true
-# ==============================================================================
+# ============================================================================== 
 # MMA_Walls-and-Slabs - Dialog Manager
-# ==============================================================================
+# ============================================================================== 
 
 require_relative '../core/constants'
 require_relative '../core/geometry_helper'
@@ -164,7 +164,7 @@ module MMA_WallsAndSlabs
       params
     end
 
-    def self.show_wall_dialog(target_group = nil, create_wall: false)
+    def self.show_wall_dialog(target_group = nil, create_wall: false, selection_path: nil)
       target_group = nil unless target_group && WallModel.valid_wall_group?(target_group)
       html_path = File.join(__dir__, 'html', 'wall_dialog.html')
       dialog = UI::HtmlDialog.new(
@@ -215,11 +215,20 @@ module MMA_WallsAndSlabs
               data[key] = existing[key] if existing.key?(key)
             end
             WallBuilder.build(Sketchup.active_model, data, target_group)
+          elsif create_wall && selection_path
+            @cached_wall_params = data
+            path_params = data.merge(
+              'path_closed' => selection_path['closed'],
+              'openings' => []
+            )
+            path_params.delete('arc')
+            path_params.delete('joints')
+            WallBuilder.build_path(Sketchup.active_model, path_params, selection_path['points'])
           else
             @cached_wall_params = data
           end
           dialog.close
-          Sketchup.active_model.select_tool(DrawWallTool.new(data)) if create_wall
+          Sketchup.active_model.select_tool(DrawWallTool.new(data)) if create_wall && selection_path.nil?
         rescue StandardError => error
           UI.messagebox("Could not save wall settings: #{error.message}")
         end
@@ -228,7 +237,7 @@ module MMA_WallsAndSlabs
       dialog.show
     end
 
-    def self.show_slab_dialog(target_group = nil)
+    def self.show_slab_dialog(target_group = nil, create_from_face: nil)
       target_group = nil unless target_group && target_group.valid? &&
                                   target_group.get_attribute(DICT_NAME, ATTR_TYPE) == 'slab'
       html_path = File.join(__dir__, 'html', 'slab_dialog.html')
@@ -253,6 +262,9 @@ module MMA_WallsAndSlabs
           if target_group && target_group.valid?
             data['points'] = slab_params_for_group(target_group)['points']
             SlabBuilder.build(Sketchup.active_model, data, target_group)
+          elsif create_from_face
+            @cached_slab_params = data
+            SlabBuilder.create_from_face(Sketchup.active_model, create_from_face, data)
           else
             @cached_slab_params = data
           end

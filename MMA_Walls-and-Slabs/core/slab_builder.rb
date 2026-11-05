@@ -1,7 +1,7 @@
 # frozen_string_literal: true
-# ==============================================================================
+# ============================================================================== 
 # MMA_Walls-and-Slabs - Slab Builder
-# ==============================================================================
+# ============================================================================== 
 
 require 'json'
 require_relative 'constants'
@@ -80,13 +80,45 @@ module MMA_WallsAndSlabs
       raise
     end
 
-    def self.create_from_face(model, face, layers)
-      return nil unless face
+    # Builds a layered slab from one selected planar face. The face's plane is
+    # converted to local XY for the existing builder, then the resulting group is
+    # oriented back onto the source plane. Layer thickness follows the face normal.
+    def self.create_from_face(model, face, settings)
+      return nil unless model && face && face.valid?
+      raise ArgumentError, 'Slabs from selected faces do not support inner loops.' if face.loops.length > 1
 
-      pts = face.outer_loop.vertices.map { |v| [GeometryHelper.to_mm(v.position.x), GeometryHelper.to_mm(v.position.y)] }
-      elevation = GeometryHelper.to_mm(face.vertices.first.position.z)
-      params = { 'points' => pts, 'elevation' => elevation, 'reference' => 'top', 'layers' => layers, 'openings' => [] }
-      build(model, params)
+      params = settings.is_a?(Hash) ? settings.dup : { 'layers' => settings }
+      outer_vertices = face.outer_loop.vertices
+      raise ArgumentError, 'The selected face must have at least three boundary vertices.' if outer_vertices.length < 3
+
+      origin = outer_vertices.first.position
+      normal = face.normal.clone
+      normal.normalize!
+      edge = face.outer_loop.edges.first
+      direction = edge.start.position.vector_to(edge.end.position)
+      projection = direction.dot(normal)
+      x_axis = Geom::Vector3d.new(direction.x - normal.x * projection,
+                                  direction.y - normal.y * projection,
+                                  direction.z - normal.z * projection)
+      raise ArgumentError, 'Could not determine an in-plane direction for the selected face.' if x_axis.length <= 1e-9
+
+      x_axis.normalize!
+      y_axis = normal.cross(x_axis)
+      y_axis.normalize!
+      points = outer_vertices.map do |vertex|
+        delta = origin.vector_to(vertex.position)
+        [GeometryHelper.to_mm(delta.dot(x_axis)), GeometryHelper.to_mm(delta.dot(y_axis))]
+      end
+      params['points'] = points
+      params['elevation'] = Float(params['elevation'] || 0.0)
+      params['reference'] = 'bottom' if params['reference'] == 'bottom'
+      params['reference'] = 'top' unless params['reference'] == 'bottom'
+      params['openings'] ||= []
+
+      group = build(model, params)
+      transform = Geom::Transformation.axes(origin, x_axis, y_axis, normal)
+      group.transformation = transform
+      group
     end
 
     def self.slab_patches(points, openings)
