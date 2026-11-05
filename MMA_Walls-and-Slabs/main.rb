@@ -55,13 +55,36 @@ module MMA_WallsAndSlabs
     cmd_opening.small_icon = File.join(icon_dir, 'opening_16.png')
     cmd_opening.large_icon = File.join(icon_dir, 'opening_24.png')
 
-    cmd_join_walls = UI::Command.new('Join Walls') do
-      model = Sketchup.active_model
-      model.select_tool(JoinWallTool.new) if model
+    # One button per join mode. The mode is fixed when the button is clicked, so
+    # nothing needs to be asked while the tool is already active.
+    join_commands = {
+      'corner' => 'Join Walls: Corner',
+      'trim' => 'Join Walls: Trim',
+      'extend' => 'Join Walls: Extend',
+      'chamfer' => 'Join Walls: Chamfer'
+    }.map do |mode, label|
+      command = UI::Command.new(label) do
+        distance = nil
+        if mode == 'chamfer'
+          answer = UI.inputbox(['Chamfer distance (mm)'], ['200'], [''], 'MMA Chamfer')
+          next unless answer
+
+          distance = Float(answer[0].to_s.strip, exception: false)
+          unless distance&.positive?
+            UI.messagebox('The chamfer distance must be a number greater than zero.')
+            next
+          end
+        end
+        model = Sketchup.active_model
+        model.select_tool(JoinWallTool.new(mode, distance)) if model
+      end
+      command.tooltip = label
+      command.status_bar_text = JoinWallTool::MODE_PROMPTS[mode]
+      icon = mode == 'corner' ? 'join_corner' : 'join_wall'
+      command.small_icon = File.join(icon_dir, "#{icon}_16.png")
+      command.large_icon = File.join(icon_dir, "#{icon}_24.png")
+      command
     end
-    cmd_join_walls.tooltip = 'Join two MMA walls'
-    cmd_join_walls.small_icon = File.join(icon_dir, 'join_wall_16.png')
-    cmd_join_walls.large_icon = File.join(icon_dir, 'join_wall_24.png')
 
     cmd_edit_wall = UI::Command.new('Edit Wall') do
       model = Sketchup.active_model
@@ -98,7 +121,7 @@ module MMA_WallsAndSlabs
     toolbar.add_item(cmd_draw_arc_wall)
     toolbar.add_item(cmd_draw_slab)
     toolbar.add_item(cmd_opening)
-    toolbar.add_item(cmd_join_walls)
+    join_commands.each { |command| toolbar.add_item(command) }
     toolbar.add_item(cmd_edit_wall)
     toolbar.add_separator
     toolbar.add_item(cmd_wall_dialog)
@@ -107,7 +130,7 @@ module MMA_WallsAndSlabs
     toolbar.show
 
     menu = UI.menu('Extensions').add_submenu('MMA Walls and Slabs')
-    [cmd_draw_wall, cmd_draw_arc_wall, cmd_draw_slab, cmd_opening, cmd_join_walls, cmd_edit_wall,
+    [cmd_draw_wall, cmd_draw_arc_wall, cmd_draw_slab, cmd_opening, *join_commands, cmd_edit_wall,
      cmd_wall_dialog, cmd_slab_dialog, cmd_opening_dialog].each do |command|
       menu.add_item(command)
     end

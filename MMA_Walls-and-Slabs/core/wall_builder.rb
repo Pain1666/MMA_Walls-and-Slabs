@@ -4,19 +4,33 @@
 # ==============================================================================
 
 require 'json'
+require 'securerandom'
 require_relative 'constants'
 require_relative 'geometry_helper'
 require_relative 'joint_geometry'
+require_relative 'joint_solver'
 require_relative 'segment_layers'
 require_relative 'arc_geometry'
 require_relative 'wall_object'
 
 module MMA_WallsAndSlabs
   class WallBuilder
+    # Stable id of a wall, kept in the group's attributes. Joints link walls by
+    # this id rather than by persistent_id, which is not reliable enough for links.
+    def self.wall_id(group)
+      id = group.get_attribute(DICT_NAME, 'wall_id').to_s
+      return id unless id.empty?
+
+      id = SecureRandom.hex(8)
+      group.set_attribute(DICT_NAME, 'wall_id', id)
+      id
+    end
+
     def self.serialize_group_data(group, params)
       unless group.get_attribute(DICT_NAME, ATTR_VERSION) == PLUGIN_DATA_VERSION
         group.set_attribute(DICT_NAME, ATTR_VERSION, PLUGIN_DATA_VERSION)
       end
+      wall_id(group)
       payload = JSON.generate(params)
       existing = group.get_attribute(DICT_NAME, ATTR_DATA)
       return if existing == payload
@@ -249,59 +263,156 @@ module MMA_WallsAndSlabs
       SegmentLayers.boundaries(stack_thicknesses(stack_for(params, segment, active)), params['justification'])
     end
 
-    # Mitred corners at each end of an open wall that is joined to another wall.
-    # Returns { 'start' => [[x, y], ...], 'end' => [[x, y], ...] }, one point per
-    # layer boundary. Only used when both walls agree on the link (mutual check).
+    # Layer-end corners at each joined end of an open wall. Returns
+    # { 'start' => [[x, y], ...], 'end' => [...] } with one point per layer boundary,
+    # in the same order as the boundaries used by build_path_segment.
     def self.joint_corners(model, own_group, params, path_points, closed)
       joints = params['joints']
       return {} if closed || model.nil? || own_group.nil? || !joints.is_a?(Hash) || joints.empty?
 
-      own_id = own_group.persistent_id
-      segment_count = path_points.length - 1
       table = {}
-
       %w[start end].each do |end_key|
         joint = joints[end_key]
         next unless joint.is_a?(Hash)
 
-        neighbour = find_wall_group(model, joint['uid'].to_i)
-        next if neighbour.nil? || neighbour == own_group
+        own = end_frame(params, path_points, end_key == 'start')
+        next unless own
 
-        other = WallModel.from_group(neighbour)
-        next unless other && other.path_points && !other.path_closed? && !other.arc?
-
-        other_end = joint['other_end'].to_s
-        back = other.params['joints'].is_a?(Hash) ? other.params['joints'][other_end] : nil
-        next unless back.is_a?(Hash) && back['uid'].to_i == own_id && back['other_end'].to_s == end_key
-
-        at_start = end_key == 'start'
-        other_at_start = other_end == 'start'
-        other_path = other.path_points
-        own_point = at_start ? path_points.first : path_points.last
-        other_point = other_at_start ? other_path.first : other_path.last
-        own_dir = JointGeometry.path_direction(path_points, at_start)
-        other_dir = JointGeometry.path_direction(other_path, other_at_start)
-        next unless own_dir && other_dir
-
-        own_offsets = end_boundaries(params, at_start, segment_count)
-        other_offsets = end_boundaries(other.params, other_at_start, other_path.length - 1)
-        total = own_offsets.last - own_offsets.first
-        limit = JointGeometry::MITRE_LIMIT_FACTOR * [total, 1.0].max
-        joint_point = [(own_point[0] + other_point[0]) / 2.0, (own_point[1] + other_point[1]) / 2.0]
-        table[end_key] = JointGeometry.boundary_corners(
-          own_point, JointGeometry.left_normal(own_dir), own_offsets,
-          other_point, JointGeometry.left_normal(other_dir), other_offsets,
-          joint_point, limit
-        )
+        corners = case joint_kind(joint)
+                  when 'corner' then corner_corners(model, own_group, end_key, own, joint)
+                  when 'chamfer' then chamfer_corners(model, own_group, end_key, own, joint)
+                  when 't' then tee_corners(model, own, joint)
+                  end
+        table[end_key] = corners if corners
       end
       table
     end
 
-    def self.find_wall_group(model, persistent_id)
-      return nil unless model && persistent_id.is_a?(Integer) && persistent_id.positive?
+    def self.joint_kind(joint)
+      kind = joint['kind'].to_s
+      return kind unless kind.empty?
+
+      joint['other_end'].to_s == 't' ? 't' : 'corner'
+    end
+
+    # Frame of one end: joint point, outward direction, outward-frame offsets of
+    # every boundary, and the core's position among the active layers.
+    def self.end_frame(params, path_points, at_start)
+      direction = JointGeometry.path_direction(path_points, at_start)
+      return nil unless direction
+
+      active = active_layer_indices(params)
+      segment = at_start ? 0 : path_points.length - 2
+      sigma = at_start ? -1.0 : 1.0
+      outward = [sigma * direction[0], sigma * direction[1]]
+      stack = stack_for(params, segment, active)
+      bounds = SegmentLayers.boundaries(stack_thicknesses(stack), params['justification'])
+      q = bounds.map { |offset| sigma * offset }
+      core = core_position(params, active)
+      {
+        point: at_start ? path_points.first : path_points.last,
+        outward: outward,
+        n: JointGeometry.left_normal(outward),
+        q: q,
+        b: bounds,
+        n_path: JointGeometry.left_normal(direction),
+        core_k: core,
+        core_q: [q[core], q[core + 1]]
+      }
+    end
+
+    def self.joint_limit(own)
+      # Use the spread of the offsets, not last - first: at a start end the
+      # outward-frame offsets run in reverse, which made the limit negative.
+      JointGeometry::MITRE_LIMIT_FACTOR * [(own[:b].max - own[:b].min).abs, 1.0].max
+    end
+
+    # Index (among the active layers) of the core: a layer named core / structural
+    # wall / stud, otherwise the thickest layer.
+    def self.core_position(params, active)
+      full = wall_layers(params)
+      named = active.each_index.find { |index| full[active[index]]['name'].to_s =~ /core|structural wall|stud/i }
+      return named if named
+
+      active.each_index.max_by { |index| full[active[index]]['thickness'].to_f }
+    end
+
+    def self.linked_back?(other_wall, other_end, own_group, own_end)
+      joint = other_wall.params['joints'].is_a?(Hash) ? other_wall.params['joints'][other_end] : nil
+      joint.is_a?(Hash) && joint['uid'].to_s == wall_id(own_group) && joint['other_end'].to_s == own_end
+    end
+
+    def self.corner_corners(model, own_group, end_key, own, joint)
+      other_group = find_wall_group(model, joint['uid'].to_s)
+      return nil if other_group.nil? || other_group == own_group
+
+      other = WallModel.from_group(other_group)
+      return nil unless other && other.path_points && !other.path_closed? && !other.arc?
+
+      other_end = joint['other_end'].to_s
+      return nil unless linked_back?(other, other_end, own_group, end_key)
+
+      other_frame = end_frame(other.params, other.path_points, other_end == 'start')
+      return nil unless other_frame && other_frame[:b].length == own[:b].length
+
+      JointSolver.corner_by_index(own[:point], own[:n_path], own[:b], other_frame[:n_path], other_frame[:b], joint_limit(own))
+    end
+
+    def self.chamfer_corners(model, own_group, end_key, own, joint)
+      other_group = find_wall_group(model, joint['uid'].to_s)
+      return nil if other_group.nil? || other_group == own_group
+
+      other = WallModel.from_group(other_group)
+      return nil unless other && linked_back?(other, joint['other_end'].to_s, own_group, end_key)
+
+      cut = joint['cut']
+      return nil unless cut.is_a?(Array) && cut.length == 2
+
+      JointSolver.chamfer(own[:point], own[:n], own[:q], cut[0], cut[1])
+    end
+
+    # Stub end on a through wall: the core meets the core face of the through
+    # wall on the stub's side, every other layer meets its outer face.
+    def self.tee_corners(model, own, joint)
+      through_group = find_wall_group(model, joint['uid'].to_s)
+      return nil unless through_group
+
+      through = WallModel.from_group(through_group)
+      return nil unless through && through.path_points && !through.arc?
+
+      point = own[:point]
+      on_path = SegmentLayers.project_onto_path(through.path_points, point[0], point[1], through.path_closed?)
+      segment = SegmentLayers.nearest_segment(through.path_points, point[0], point[1], through.path_closed?)
+      return nil unless on_path && segment
+
+      a = through.path_points[segment]
+      b = through.path_points[(segment + 1) % through.path_points.length]
+      direction = JointGeometry.unit(a, b)
+      return nil unless direction
+
+      n_through = JointGeometry.left_normal(direction)
+      active = active_layer_indices(through.params)
+      faces = SegmentLayers.boundaries(stack_thicknesses(stack_for(through.params, segment, active)),
+                                       through.params['justification'])
+      core = core_position(through.params, active)
+      body_dot = (-own[:outward][0] * n_through[0]) + (-own[:outward][1] * n_through[1])
+      if body_dot >= 0
+        face_core = faces[core + 1]
+        face_outer = faces.last
+      else
+        face_core = faces[core]
+        face_outer = faces.first
+      end
+
+      core_flags = own[:q].each_index.map { |index| index == own[:core_k] || index == own[:core_k] + 1 }
+      JointSolver.tee(point, own[:n], own[:q], core_flags, on_path, n_through, face_core, face_outer, joint_limit(own))
+    end
+
+    def self.find_wall_group(model, id)
+      return nil unless model && !id.to_s.empty?
 
       model.entities.grep(Sketchup::Group).find do |group|
-        group.valid? && group.persistent_id == persistent_id && WallModel.valid_wall_group?(group)
+        group.valid? && group.get_attribute(DICT_NAME, 'wall_id').to_s == id.to_s && WallModel.valid_wall_group?(group)
       end
     end
 
