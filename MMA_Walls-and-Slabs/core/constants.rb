@@ -55,7 +55,7 @@ module MMA_WallsAndSlabs
       'MMA_Concrete_Block'  => 'Concrete_Block_01.jpg',
       'MMA_Metal_Stud'      => 'Metal_01.png',
       'MMA_Drywall_Board'   => 'Plaster_Int_01.jpg',
-      'MMA_Insulation_EPS'  => 'Wool-insulation_01.jpg',
+      'MMA_Insulation_EPS'  => 'XPS_FOAM_R50.jpg',
       'MMA_Render_Ext'      => 'Plaster_Ext_01.jpg',
       'MMA_Plaster_Int'     => 'Plaster_Int_01.jpg',
       'MMA_Screed'          => 'Concrete_02.jpg',
