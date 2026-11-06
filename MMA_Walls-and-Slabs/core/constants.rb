@@ -73,7 +73,7 @@ module MMA_WallsAndSlabs
       'Concrete_Block_01.jpg'  => [1560.0, 980.0],
       'Plaster_Ext_01.jpg'     => [980.0, 1024.0],
       'Plaster_Int_01.jpg'     => [980.0, 1024.0],
-      'Wool-insulation_01.jpg' => [900.0, 805.0],
+      'Wool-insulation_01.jpg' => [1150.0, 2300.0],
       'Concrete_02.jpg'        => [600.0, 600.0],
       'Stone_01.jpg'           => [1200.0, 2400.0],
       'Stone_02.png'           => [1861.0, 1186.0],
